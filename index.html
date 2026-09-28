@@ -157,6 +157,9 @@ details.card[open]>summary::after{content:"－"}
 .check input{width:22px;height:22px;accent-color:var(--accent)}
 pre.code{margin:0;background:var(--sunk);border-radius:10px;padding:12px;font-family:var(--mono);font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre}
 ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:flex;flex-direction:column;gap:4px}
+.chain{background:var(--sunk);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--ink2);display:flex;flex-direction:column;gap:2px}
+.chain b{color:var(--ink);font-weight:600}
+.chain .num{font-family:var(--mono);font-size:12px}
 .remind{background:var(--accent-soft);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
 .remind p{margin:0;font-size:14px;font-weight:500}
 .remind .btn{background:var(--accent);color:var(--accent-ink)}
@@ -202,6 +205,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
   <form class="card" id="form" autocomplete="off">
     <h2 id="formTitle">走行を記録</h2>
     <label class="f">日付<span class="pick"><span class="in face" id="fDateFace"></span><input type="date" id="fDate" required aria-label="日付"></span></label>
+    <div class="chain" id="dayChain" hidden></div>
     <div class="route">
       <label class="f">出発<input class="in" id="fFrom" placeholder="場所を入力 または下から選択"></label>
       <div class="chips" id="fromChips"></div>
@@ -222,7 +226,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
     <div class="msg" id="fMsg" role="alert"></div>
     <div class="actions" id="actions">
       <button type="button" class="btn ghost sm" id="cancelEdit" hidden>やめる</button>
-      <button type="submit" class="btn" id="submitBtn">記録する</button>
+      <button type="submit" class="btn" id="submitBtn">＋ 追加</button>
     </div>
   </form>
 
@@ -321,7 +325,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 // Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
 const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
@@ -493,6 +497,29 @@ function calc(src) {
   $('#pvRate').textContent = `1kmあたり 通勤${S.settings.cRate}円・業務${S.settings.bRate}円`;
   $('#pvAmt').textContent = yen(amtC(e) + amtB(e));
 }
+// その日の走行（時刻順）
+function dayEntries(date) { return date ? sortEntries(getMonth(ymOf(date)).filter(e => e.date === date)) : []; }
+function renderChain() {
+  const d = $('#fDate').value, list = dayEntries(d), el = $('#dayChain');
+  el.hidden = !list.length;
+  if (!list.length) return;
+  const path = [list[0].from, ...list.map(e => e.to)].map(esc).join(' → ');
+  const sum = list.reduce((a, e) => a + (e.km || 0), 0);
+  el.innerHTML = `<span>この日の経路（${list.length}区間・<span class="num">${km(sum)} km</span>）</span><b>${path}</b>`;
+}
+// 日付を変えた時：その日にすでに記録があれば、最後の到着地とメーターから続ける
+function continueFrom(date) {
+  const last = dayEntries(date).at(-1);
+  if (last) {
+    $('#fFrom').value = last.to;
+    if (last.endM != null) $('#fStart').value = last.endM;
+  } else {
+    $('#fFrom').value = S.settings.lastPlace || '';
+    $('#fStart').value = S.settings.lastMeter ?? '';
+  }
+  $('#fTo').value = ''; $('#fEnd').value = ''; $('#fKm').value = '';
+  S.cManual = false; renderChips(); calc(); renderChain();
+}
 function resetForm(keepDate) {
   const d = keepDate ? $('#fDate').value : todayStr();
   $('#form').reset();
@@ -501,10 +528,12 @@ function resetForm(keepDate) {
   $('#fStart').value = S.settings.lastMeter ?? '';
   S.editingId = null; S.cManual = false;
   $('#formTitle').textContent = '走行を記録';
-  $('#submitBtn').textContent = '記録する';
+  $('#submitBtn').textContent = '＋ 追加';
   $('#cancelEdit').hidden = true; $('#actions').classList.remove('two');
   $('#fMsg').textContent = '';
-  renderChips(); calc();
+  const last = dayEntries($('#fDate').value).at(-1);
+  if (last) { $('#fFrom').value = last.to; if (last.endM != null) $('#fStart').value = last.endM; }
+  renderChips(); calc(); renderChain();
 }
 function loadIntoForm(e) {
   S.editingId = e.id; S.cManual = true;
@@ -546,9 +575,11 @@ function onSubmit(ev) {
   if (!wasEdit) S.settings.lastPlace = to;
   saveSettings();
   S.justAdded = entry.id;
-  toast(wasEdit ? '更新しました' : `記録しました（${entry.km} km・${yen(amtC(entry) + amtB(entry))}）`);
+  toast(wasEdit ? '更新しました' : `追加しました（${entry.km} km）。続けて次の区間を入力できます`);
   resetForm(true);
   setView(ym);
+  renderChain();
+  if (!wasEdit) $('#form').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function deleteEntry(id) {
   const list = S.entries.filter(x => x.id !== id);
@@ -786,7 +817,7 @@ function settingsChanged() { clearTimeout(setT); setT = setTimeout(saveSettings,
 /* ---------- イベント ---------- */
 $('#form').addEventListener('submit', onSubmit);
 $('#fDate').addEventListener('input', syncPickers);
-$('#fDate').addEventListener('change', syncPickers);
+$('#fDate').addEventListener('change', () => { syncPickers(); if (!S.editingId) continueFrom($('#fDate').value); else renderChain(); });
 $('#fStart').addEventListener('input', () => calc('start'));
 $('#fEnd').addEventListener('input', () => calc('end'));
 $('#fKm').addEventListener('input', () => calc('km'));
