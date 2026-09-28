@@ -1,7 +1,7 @@
 // 走行メーター帳：オフラインでも開けるようにするキャッシュ
 // 画面を更新したら CACHE の番号を上げる（例 v2）と、各iPhoneに新しい版が届きます。
-const CACHE = 'meterbook-v5';
-const FILES = ['./', 'index.html', 'manifest.webmanifest', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'meterbook-v6';
+const FILES = ['./', 'index.html', 'manifest.webmanifest', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'Code.gs'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

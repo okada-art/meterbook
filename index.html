@@ -282,27 +282,30 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
       </div>
 
       <div class="group">
-        <h3>スプレッドシート連携</h3>
-        <label class="f">送信先URL（Apps Scriptのウェブアプリ）<input class="in" id="sGas" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec"></label>
-        <label class="check"><input type="checkbox" id="sAuto"> 記録・編集・削除のたびに自動で送信する</label>
+        <h3>自動バックアップ（Googleスプレッドシート）</h3>
+        <label class="f">送信先URL（Apps Scriptのウェブアプリ）<input class="in" id="sGas" inputmode="url" autocapitalize="off" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <label class="f">合言葉<input class="in" id="sKey" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+        <label class="check"><input type="checkbox" id="sAuto"> 記録・編集・削除のたびに自動でバックアップする</label>
+        <p class="hint" id="syncLine"></p>
+        <button type="button" class="btn ghost sm" id="pullBtn">スプレッドシートから戻す</button>
+        <p class="hint">送ったデータは、月ごとの明細シート（例：2026-09_氏名）と「バックアップ」シートに入ります。合言葉は最初の送信で登録され、スプレッドシートの「バックアップ」シートのB1にも書かれます。機種変更の時は、新しいiPhoneでURLと合言葉を入れて「スプレッドシートから戻す」を押してください。</p>
         <details>
           <summary class="hint" style="cursor:pointer">送信先URLの作り方</summary>
           <ol class="steps">
-            <li>Googleスプレッドシートを新しく作ります（会社で1つ作って全員が同じURLを使うこともできます）。</li>
+            <li>Googleスプレッドシートを新しく作ります。</li>
             <li>メニューの「拡張機能」→「Apps Script」を開きます。</li>
             <li>最初からある文字を全部消し、下のコードを貼り付けて保存します。</li>
             <li>「デプロイ」→「新しいデプロイ」→種類「ウェブアプリ」。実行ユーザー「自分」、アクセスできるユーザー「全員」でデプロイします。</li>
             <li>表示された「ウェブアプリのURL」を上の欄に貼り付けます。</li>
           </ol>
-          <pre class="code" id="gasCode"></pre>
+          <pre class="code" id="gasCode">読み込み中…</pre>
           <button type="button" class="btn ghost sm" id="copyGas" style="margin-top:8px;width:100%">コードをコピー</button>
         </details>
-        <p class="hint">送信すると「2026-08_氏名」という名前のシートに、その月の明細を丸ごと書き込みます。何度送っても上書きされるだけです。</p>
       </div>
 
       <div class="group">
         <h3>バックアップ</h3>
-        <p class="hint">記録はこのiPhoneの中だけに保存されています。機種変更の前や月に1回は、バックアップをファイルに書き出してください。</p>
+        <p class="hint">自動バックアップを使わない場合は、機種変更の前や月に1回、ファイルに書き出してください。</p>
         <div class="grid2">
           <button type="button" class="btn ghost sm" id="backupBtn">書き出す</button>
           <label class="btn ghost sm" style="display:grid;place-items:center;cursor:pointer">読み込む<input type="file" id="restoreFile" accept=".json,application/json" hidden></label>
@@ -318,7 +321,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.2.3';
+const APP_VERSION = '1.3.0';
 // Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
 const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
@@ -334,7 +337,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 const DEFAULTS = {
   name: '', cRate: 29, bRate: 29, home: '自宅', commuteKm: 0,
-  places: ['自宅', '会社'], lastMeter: null, lastPlace: '', gasUrl: '', autoSend: false, slackTeam: SLACK_DEFAULT.team, slackUser: SLACK_DEFAULT.user, slackName: SLACK_DEFAULT.name
+  places: ['自宅', '会社'], lastMeter: null, lastPlace: '', gasUrl: '', syncKey: '', autoSend: true, slackTeam: SLACK_DEFAULT.team, slackUser: SLACK_DEFAULT.user, slackName: SLACK_DEFAULT.name
 };
 const S = { settings: { ...DEFAULTS }, viewYm: ymOf(todayStr()), entries: [], editingId: null, cManual: false, justAdded: null };
 
@@ -349,11 +352,12 @@ function allMonthKeys() {
 }
 const getMonth = ym => { const d = lsGet('m-' + ym); return d && Array.isArray(d.entries) ? d.entries.slice() : []; };
 function setStatus(s, t) { const el = $('#status'); el.dataset.s = s; el.textContent = t; }
+function idleStatus() { setStatus('idle', S.settings.gasUrl && lsGet('syncAt') && !Object.keys(lsGet('unsent') || {}).length ? 'バックアップ済み' : 'この端末に保存'); }
 function saveSettings() { if (!lsPut('settings', S.settings)) storageError(); }
 function saveMonth(ym, entries) {
   const ok = lsPut('m-' + ym, { entries, updatedAt: new Date().toISOString() });
   if (!ok) storageError();
-  else if (S.settings.autoSend && S.settings.gasUrl) sendSheet(ym, entries, true);
+  else { markUnsent(ym); if (S.settings.autoSend && S.settings.gasUrl) flushBackup(); }
   return ok;
 }
 function storageError() { setStatus('error', '保存できません'); toast('保存できませんでした。プライベートブラウズを解除してください。'); }
@@ -437,6 +441,7 @@ function renderSettings() {
   $('#sBRate').value = st.bRate;
   $('#sCommute').value = st.commuteKm || 0;
   $('#sGas').value = st.gasUrl || '';
+  $('#sKey').value = st.syncKey || '';
   $('#sAuto').checked = !!st.autoSend;
   $('#sSlackName').value = st.slackName || '';
   $('#sSlackLink').value = st.slackUser && st.slackTeam ? `https://${st.slackTeam}.slack.com/team/${st.slackUser}` : '';
@@ -456,9 +461,13 @@ function renderSendLine() {
   renderSlackLine();
   const st = S.settings;
   $('#sheetBtn').hidden = !st.gasUrl;
-  const last = (lsGet('sent') || {})[S.viewYm];
   $('#sendLine').hidden = !st.gasUrl;
-  $('#sendLine').textContent = last ? `前回の送信：${new Date(last).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${st.autoSend ? '（自動送信オン）' : ''}` : (st.autoSend ? '自動送信オン' : 'この月はまだ送信していません');
+  const unsent = Object.keys(lsGet('unsent') || {}).length;
+  const at = lsGet('syncAt');
+  const when = at ? new Date(at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const line = !st.gasUrl ? '' : unsent ? `未バックアップが${unsent}か月分あります。電波のある所でアプリを開くと送ります。` : at ? `最後のバックアップ：${when}` : 'まだバックアップしていません';
+  $('#sendLine').textContent = line;
+  $('#syncLine').textContent = !st.gasUrl ? '送信先URLを入れると、記録のたびに自動でバックアップします。' : line;
 }
 function renderAll() { renderOdo(); renderSummary(); renderList(); renderRank(); renderChips(); renderSendLine(); calc(); }
 
@@ -607,22 +616,60 @@ function printSheet() {
     <div class="sign"><div>承認</div><div>確認</div><div>申請</div></div>`;
   window.print();
 }
-async function sendSheet(ym, entries, silent) {
-  const url = S.settings.gasUrl;
-  if (!url) return;
-  if (!silent) { $('#sheetBtn').disabled = true; $('#sheetBtn').textContent = '送信中…'; }
-  const payload = { app: 'meterbook', name: S.settings.name || '未設定', month: ym, rows: tableRows(entries) };
-  try {
-    await fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
-    const sent = lsGet('sent') || {}; sent[ym] = Date.now(); lsPut('sent', sent);
-    if (!silent) toast(`送信しました（シート名：${ym}_${payload.name}）`);
-  } catch {
-    if (!silent) toast('送信できませんでした。電波の良い所でもう一度お試しください');
-    else setStatus('error', '送信できませんでした');
-  } finally {
-    if (!silent) { $('#sheetBtn').disabled = false; $('#sheetBtn').textContent = 'スプレッドシートに送信'; }
+// バックアップ：未送信の月を覚えておき、つながった時にまとめて送る
+function markUnsent(ym) { const u = lsGet('unsent') || {}; u[ym] = 1; lsPut('unsent', u); }
+const newKey = () => Array.from(crypto.getRandomValues(new Uint8Array(9)), b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
+function ensureKey() { if (!S.settings.syncKey) { S.settings.syncKey = newKey(); saveSettings(); renderSettings(); } return S.settings.syncKey; }
+async function postBackup(ym) {
+  const entries = getMonth(ym);
+  const { gasUrl, ...safe } = S.settings;
+  const payload = { app: 'meterbook', key: ensureKey(), name: S.settings.name || '未設定', month: ym, rows: tableRows(entries), entries, settings: safe };
+  await fetch(S.settings.gasUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+}
+let flushing = null;
+function flushBackup(force) {
+  if (!S.settings.gasUrl || (!S.settings.autoSend && !force)) return Promise.resolve(false);
+  if (flushing) return flushing.then(() => flushBackup(force));
+  flushing = (async () => {
+    const months = Object.keys(lsGet('unsent') || {});
+    if (force && !months.includes(S.viewYm)) months.push(S.viewYm);
+    if (!months.length) return true;
+    setStatus('saving', 'バックアップ中…');
+    let ok = true;
+    for (const ym of months) {
+      try {
+        await postBackup(ym);
+        const u = lsGet('unsent') || {}; delete u[ym]; lsPut('unsent', u);
+        const sent = lsGet('sent') || {}; sent[ym] = Date.now(); lsPut('sent', sent);
+      } catch { ok = false; break; }
+    }
+    if (ok) { lsPut('syncAt', Date.now()); idleStatus(); }
+    else setStatus('error', '未バックアップあり');
     renderSendLine();
-  }
+    return ok;
+  })().finally(() => { flushing = null; });
+  return flushing;
+}
+async function sendSheet() {
+  if (!S.settings.gasUrl) { $('#settingsBox').open = true; $('#sGas').focus(); return toast('先に送信先URLを入れてください'); }
+  $('#sheetBtn').disabled = true; $('#sheetBtn').textContent = '送信中…';
+  const ok = await flushBackup(true);
+  $('#sheetBtn').disabled = false; $('#sheetBtn').textContent = 'スプレッドシートに送信';
+  toast(ok ? '送信しました' : '送信できませんでした。電波の良い所でもう一度お試しください');
+}
+async function pullBackup() {
+  const msg = $('#restoreMsg');
+  const url = S.settings.gasUrl, key = S.settings.syncKey;
+  if (!url || !key) { $('#sGas').focus(); return toast('送信先URLと合言葉を入れてください'); }
+  const btn = $('#pullBtn'); btn.disabled = true; btn.textContent = '読み込み中…';
+  try {
+    const res = await fetch(`${url}?key=${encodeURIComponent(key)}`, { method: 'GET' });
+    const data = await res.json();
+    if (!data || !data.ok) { msg.textContent = data && data.error === 'key' ? '合言葉が違います。スプレッドシートの「バックアップ」シートのB1を確かめてください。' : '戻せませんでした。'; return; }
+    const { gasUrl, syncKey, ...rest } = data.settings || {};
+    restoreData({ ...data, settings: data.settings ? rest : null });
+  } catch { msg.textContent = 'スプレッドシートにつながりませんでした。URLと電波を確かめてください。'; }
+  finally { btn.disabled = false; btn.textContent = 'スプレッドシートから戻す'; }
 }
 
 /* ---------- Slackで報告 ---------- */
@@ -699,49 +746,36 @@ function backup() {
   shareOrDownload(`メーター帳バックアップ_${todayStr()}${nameTag()}.json`, JSON.stringify(data), 'application/json')
     .then(ok => { if (ok) { lsPut('backupAt', Date.now()); $('#restoreMsg').textContent = `${Object.keys(months).length}か月分・${n}件を書き出しました。`; } });
 }
-async function restore(file) {
+function restoreData(data) {
   const msg = $('#restoreMsg');
-  try {
-    const data = JSON.parse(await file.text());
-    if (!data || data.app !== 'meterbook' || typeof data.months !== 'object') throw 0;
-    let added = 0;
-    for (const [ym, arr] of Object.entries(data.months)) {
-      if (!/^\d{4}-\d{2}$/.test(ym) || !Array.isArray(arr)) continue;
-      const cur = getMonth(ym); const ids = new Set(cur.map(e => e.id));
-      for (const e of arr) if (e && e.id && !ids.has(e.id)) { cur.push(e); added++; }
-      lsPut('m-' + ym, { entries: cur, updatedAt: new Date().toISOString() });
-    }
-    if (data.settings) {
-      const keep = S.settings;
-      // 今の設定を土台に、ファイルにある項目だけ上書き。場所は今の一覧に足す
-      S.settings = { ...DEFAULTS, ...keep, ...data.settings, places: [...new Set([...keep.places, ...(data.settings.places || [])])] };
-      if ((keep.lastMeter ?? 0) > (S.settings.lastMeter ?? 0)) S.settings.lastMeter = keep.lastMeter;
-      saveSettings();
-    }
-    msg.textContent = added ? `${added}件を読み込みました（同じ記録は重複させていません）。` : 'このファイルの記録はすべて読み込み済みです。';
-    renderSettings(); resetForm(false); setView(S.viewYm);
-  } catch { msg.textContent = 'このファイルは読み込めません。メーター帳で書き出したバックアップを選んでください。'; }
+  if (!data || data.app !== 'meterbook' || typeof data.months !== 'object') throw 0;
+  let added = 0;
+  for (const [ym, arr] of Object.entries(data.months)) {
+    if (!/^\d{4}-\d{2}$/.test(ym) || !Array.isArray(arr)) continue;
+    const cur = getMonth(ym); const ids = new Set(cur.map(e => e.id));
+    for (const e of arr) if (e && e.id && !ids.has(e.id)) { cur.push(e); added++; }
+    lsPut('m-' + ym, { entries: cur, updatedAt: new Date().toISOString() });
+    if (added) markUnsent(ym);
+  }
+  if (data.settings) {
+    const keep = S.settings;
+    // 今の設定を土台に、データにある項目だけ上書き。場所は今の一覧に足す
+    S.settings = { ...DEFAULTS, ...keep, ...data.settings, places: [...new Set([...keep.places, ...(data.settings.places || [])])] };
+    if ((keep.lastMeter ?? 0) > (S.settings.lastMeter ?? 0)) S.settings.lastMeter = keep.lastMeter;
+    saveSettings();
+  }
+  msg.textContent = added ? `${added}件を読み込みました（同じ記録は重複させていません）。` : '記録はすべて読み込み済みです。';
+  renderSettings(); resetForm(false); setView(S.viewYm);
+  flushBackup();
+}
+async function restore(file) {
+  try { restoreData(JSON.parse(await file.text())); }
+  catch { $('#restoreMsg').textContent = 'このファイルは読み込めません。メーター帳で書き出したバックアップを選んでください。'; }
 }
 
 /* ---------- GAS コード ---------- */
-const GAS = `// 走行メーター帳 → スプレッドシート受け取り用
-function doPost(e) {
-  var d = JSON.parse(e.postData.contents);
-  if (d.app !== 'meterbook' || !d.rows || !d.rows.length) {
-    return ContentService.createTextOutput('ng');
-  }
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var title = (d.month + '_' + String(d.name).replace(/[\\\\/?*\\[\\]:]/g, '')).slice(0, 90);
-  var sh = ss.getSheetByName(title) || ss.insertSheet(title);
-  sh.clear();
-  sh.getRange(1, 1, 1, 4).setValues([['氏名', d.name, '更新', new Date()]]);
-  sh.getRange(3, 1, d.rows.length, d.rows[0].length).setValues(d.rows);
-  sh.getRange(3, 1, 1, d.rows[0].length).setFontWeight('bold').setBackground('#eeeeee');
-  sh.getRange(2 + d.rows.length, 1, 1, d.rows[0].length).setFontWeight('bold');
-  sh.getRange(4, 9, d.rows.length - 1, 3).setNumberFormat('¥#,##0');
-  sh.setFrozenRows(3);
-  return ContentService.createTextOutput('ok');
-}`;
+let GAS = '';
+fetch('Code.gs').then(r => r.ok ? r.text() : '').then(t => { GAS = t; $('#gasCode').textContent = t || '（コードを読み込めませんでした。電波のある所で開き直してください）'; }).catch(() => {});
 
 /* ---------- 小物 ---------- */
 let toastT;
@@ -781,7 +815,7 @@ $('#viewMonth').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.tar
 $('#copyBtn').addEventListener('click', copyTable);
 $('#csvBtn').addEventListener('click', saveCsv);
 $('#printBtn').addEventListener('click', printSheet);
-$('#sheetBtn').addEventListener('click', () => { if (!S.entries.length) return toast('この月の記録がありません'); sendSheet(S.viewYm, S.entries, false); });
+$('#sheetBtn').addEventListener('click', sendSheet);
 $('#backupBtn').addEventListener('click', backup);
 $('#slackBtn').addEventListener('click', slackReport);
 $('#sSlackName').addEventListener('input', e => { S.settings.slackName = e.target.value.trim(); settingsChanged(); });
@@ -798,8 +832,11 @@ $('#sCRate').addEventListener('input', e => { const v = toNum(e.target.value); i
 $('#sBRate').addEventListener('input', e => { const v = toNum(e.target.value); if (v != null) { S.settings.bRate = v; settingsChanged(); } });
 $('#sCommute').addEventListener('input', e => { S.settings.commuteKm = toNum(e.target.value) || 0; S.cManual = false; settingsChanged(); });
 $('#sHome').addEventListener('change', e => { S.settings.home = e.target.value; S.cManual = false; settingsChanged(); renderRank(); });
-$('#sGas').addEventListener('input', e => { S.settings.gasUrl = e.target.value.trim(); settingsChanged(); });
-$('#sAuto').addEventListener('change', e => { S.settings.autoSend = e.target.checked; settingsChanged(); });
+$('#sGas').addEventListener('input', e => { S.settings.gasUrl = e.target.value.trim(); if (S.settings.gasUrl) { ensureKey(); for (const ym of allMonthKeys()) markUnsent(ym); } settingsChanged(); });
+$('#sGas').addEventListener('change', () => flushBackup());
+$('#sKey').addEventListener('input', e => { S.settings.syncKey = e.target.value.trim(); settingsChanged(); });
+$('#pullBtn').addEventListener('click', pullBackup);
+$('#sAuto').addEventListener('change', e => { S.settings.autoSend = e.target.checked; settingsChanged(); if (e.target.checked) flushBackup(); });
 $('#copyGas').addEventListener('click', async () => { try { await navigator.clipboard.writeText(GAS); toast('コードをコピーしました'); } catch { toast('コピーできませんでした。長押しで選択してください'); } });
 function addPlace() {
   const v = $('#newPlace').value.trim();
@@ -815,10 +852,11 @@ $('#newPlace').addEventListener('keydown', e => { if (e.key === 'Enter') { e.pre
 const saved = lsGet('settings');
 if (saved) S.settings = { ...DEFAULTS, ...saved, places: Array.isArray(saved.places) ? saved.places.slice() : DEFAULTS.places.slice() };
 else $('#settingsBox').open = true;
-$('#gasCode').textContent = GAS;
 $('#verLine').textContent = `バージョン ${APP_VERSION}`;
 renderSettings(); resetForm(false); setView(S.viewYm); checkRemind();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) checkRemind(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkRemind(); flushBackup(); } });
+window.addEventListener('online', () => flushBackup());
+idleStatus(); flushBackup();
 const lastBk = lsGet('backupAt'), nRec = allMonthKeys().reduce((s, ym) => s + getMonth(ym).length, 0);
 if (nRec >= 20 && (!lastBk || Date.now() - lastBk > 30 * 864e5)) setTimeout(() => toast('1か月以上バックアップしていません。設定から書き出してください'), 1200);
 try { navigator.storage?.persist?.(); } catch {}
