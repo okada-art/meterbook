@@ -197,6 +197,11 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
     </div>
   </header>
 
+  <div class="remind" id="updateBar" hidden>
+    <p id="updateText">新しい版があります。</p>
+    <button type="button" class="btn sm" id="updateBtn">新しい版に切り替える</button>
+  </div>
+
   <div class="remind" id="remind" hidden>
     <p id="remindText"></p>
     <button type="button" class="btn sm" id="remindBtn"></button>
@@ -325,7 +330,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.3.2';
+const APP_VERSION = '1.3.3';
 // Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
 const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
@@ -750,6 +755,30 @@ async function slackReport() {
   setTimeout(() => { location.href = `https://${team}.slack.com/app_redirect?channel=${encodeURIComponent(st.slackUser)}`; }, 700);
 }
 
+/* ---------- 新しい版の確認 ---------- */
+let updChecking = false, updAt = 0;
+async function checkUpdate() {
+  if (updChecking || Date.now() - updAt < 5 * 60000 || location.protocol !== 'https:') return;
+  updChecking = true; updAt = Date.now();
+  try {
+    const t = await fetch(`./index.html?v=${Date.now()}`, { cache: 'no-store' }).then(r => r.ok ? r.text() : '');
+    const m = t.match(/const APP_VERSION = '([\d.]+)'/);
+    if (m && m[1] !== APP_VERSION) {
+      $('#updateText').textContent = `新しい版（${m[1]}）があります。記録はそのまま残ります。`;
+      $('#updateBar').hidden = false;
+    }
+  } catch {} finally { updChecking = false; }
+}
+async function applyUpdate() {
+  $('#updateBtn').disabled = true; $('#updateBtn').textContent = '切り替え中…';
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) { await reg.update(); }
+    const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k)));
+  } catch {}
+  location.replace(`./?v=${Date.now()}`);
+}
+
 /* ---------- 日付が変わったら今日・今月へ ---------- */
 let lastDay = todayStr();
 function checkDayChange() {
@@ -902,7 +931,9 @@ if (saved) S.settings = { ...DEFAULTS, ...saved, places: Array.isArray(saved.pla
 else $('#settingsBox').open = true;
 $('#verLine').textContent = `バージョン ${APP_VERSION}`;
 renderSettings(); resetForm(false); setView(S.viewYm); checkRemind();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkDayChange(); checkRemind(); flushBackup(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkDayChange(); checkRemind(); flushBackup(); checkUpdate(); } });
+$('#updateBtn').addEventListener('click', applyUpdate);
+setTimeout(checkUpdate, 1500);
 window.addEventListener('pageshow', checkDayChange);
 window.addEventListener('focus', checkDayChange);
 setInterval(() => { if (!document.hidden) checkDayChange(); }, 60000);
