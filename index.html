@@ -66,6 +66,11 @@ button,input,select,textarea{font:inherit;color:inherit}
 label.f{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:500;color:var(--ink2);letter-spacing:.02em}
 input.in,select.in,textarea.in{width:100%;min-height:46px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:16px}
 input.in:focus,select.in:focus,textarea.in:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* iPhoneの日付・月の欄を他の欄と同じ幅・高さ・左寄せに揃える */
+input.in[type="date"],input.in[type="month"]{-webkit-appearance:none;appearance:none;display:block;min-width:0;max-width:100%;height:46px;line-height:24px;text-align:left}
+input.in[type="date"]::-webkit-date-and-time-value,input.in[type="month"]::-webkit-date-and-time-value{text-align:left;margin:0}
+.monthbar input.in[type="month"],.monthbar input.in[type="month"]::-webkit-date-and-time-value{text-align:center}
+.monthbar>*{min-width:0}
 input.in.big{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:.06em;font-variant-numeric:tabular-nums}
 input.in[readonly]{background:var(--sunk);color:var(--ink2)}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -310,7 +315,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.2.2';
 // Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
 const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
