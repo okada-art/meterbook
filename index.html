@@ -325,7 +325,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.3.2';
 // Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
 const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
@@ -750,6 +750,23 @@ async function slackReport() {
   setTimeout(() => { location.href = `https://${team}.slack.com/app_redirect?channel=${encodeURIComponent(st.slackUser)}`; }, 700);
 }
 
+/* ---------- 日付が変わったら今日・今月へ ---------- */
+let lastDay = todayStr();
+function checkDayChange() {
+  const today = todayStr();
+  if (today === lastDay) return;
+  const prevDay = lastDay; lastDay = today;
+  // 画面が前日の月を見ていたら今月へ
+  if (S.viewYm === ymOf(prevDay) && S.viewYm !== ymOf(today)) setView(ymOf(today));
+  // 日付欄が前日のままで、書きかけがなければ今日へ
+  const untouched = !S.editingId && !$('#fTo').value.trim() && !$('#fEnd').value.trim();
+  if (untouched && $('#fDate').value === prevDay) {
+    $('#fDate').value = today; syncPickers(); continueFrom(today);
+    toast(`日付が変わったので、${Number(today.slice(5, 7))}/${Number(today.slice(8))}に切り替えました`);
+  }
+  checkRemind();
+}
+
 /* ---------- 月末・月初のお知らせ ---------- */
 function checkRemind() {
   const now = new Date(), day = now.getDate();
@@ -885,7 +902,10 @@ if (saved) S.settings = { ...DEFAULTS, ...saved, places: Array.isArray(saved.pla
 else $('#settingsBox').open = true;
 $('#verLine').textContent = `バージョン ${APP_VERSION}`;
 renderSettings(); resetForm(false); setView(S.viewYm); checkRemind();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkRemind(); flushBackup(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkDayChange(); checkRemind(); flushBackup(); } });
+window.addEventListener('pageshow', checkDayChange);
+window.addEventListener('focus', checkDayChange);
+setInterval(() => { if (!document.hidden) checkDayChange(); }, 60000);
 window.addEventListener('online', () => flushBackup());
 idleStatus(); flushBackup();
 const lastBk = lsGet('backupAt'), nRec = allMonthKeys().reduce((s, ym) => s + getMonth(ym).length, 0);
