@@ -310,7 +310,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 // Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
 const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
@@ -698,11 +698,12 @@ async function restore(file) {
     }
     if (data.settings) {
       const keep = S.settings;
-      S.settings = { ...DEFAULTS, ...data.settings, places: [...new Set([...(data.settings.places || []), ...keep.places])] };
+      // 今の設定を土台に、ファイルにある項目だけ上書き。場所は今の一覧に足す
+      S.settings = { ...DEFAULTS, ...keep, ...data.settings, places: [...new Set([...keep.places, ...(data.settings.places || [])])] };
       if ((keep.lastMeter ?? 0) > (S.settings.lastMeter ?? 0)) S.settings.lastMeter = keep.lastMeter;
       saveSettings();
     }
-    msg.textContent = `${added}件を読み込みました（同じ記録は重複させていません）。`;
+    msg.textContent = added ? `${added}件を読み込みました（同じ記録は重複させていません）。` : 'このファイルの記録はすべて読み込み済みです。';
     renderSettings(); resetForm(false); setView(S.viewYm);
   } catch { msg.textContent = 'このファイルは読み込めません。メーター帳で書き出したバックアップを選んでください。'; }
 }
