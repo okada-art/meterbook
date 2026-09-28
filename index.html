@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>走行メーター帳</title>
+<meta name="description" content="出発・到着メーターから通勤／業務の交通費を月ごとに集計する記録アプリ">
+<meta name="theme-color" content="#1D2622">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="メーター帳">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#EEF1EE; --surface:#FFFFFF; --sunk:#E4E9E5; --line:#D3DAD5;
+  --ink:#18221E; --ink2:#4B5852; --ink3:#7C8882;
+  --accent:#C8711E; --accent-ink:#FFFFFF; --accent-soft:#F6E6D4;
+  --commute:#2C6A8A; --commute-soft:#DCEAF1;
+  --biz:#2F7A4A; --biz-soft:#DDEFE3;
+  --danger:#B53A2E;
+  --counter-bg:#1D2622; --counter-ink:#F4F1E8; --counter-cell:#2A3530;
+  --shadow:0 1px 2px rgba(24,34,30,.06),0 4px 16px rgba(24,34,30,.05);
+  --sans:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme:dark;
+    --bg:#111614; --surface:#1A211E; --sunk:#141A17; --line:#2C3632;
+    --ink:#E7ECE9; --ink2:#AAB5AF; --ink3:#7A8680;
+    --accent:#E48D3A; --accent-ink:#1A1208; --accent-soft:#3A2A1A;
+    --commute:#6FB0D2; --commute-soft:#1C2C35;
+    --biz:#6CC08A; --biz-soft:#1B2E22;
+    --danger:#E0786C;
+    --counter-bg:#0B0F0D; --counter-cell:#1C2420;
+    --shadow:0 1px 2px rgba(0,0,0,.3);
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;padding-bottom:env(safe-area-inset-bottom,0px)}
+.wrap{max-width:560px;margin:0 auto;padding-inline:16px;padding-block:0 48px;display:flex;flex-direction:column;gap:16px}
+button,input,select,textarea{font:inherit;color:inherit}
+[hidden]{display:none!important}
+
+.top{position:sticky;top:0;z-index:5;margin-inline:-16px;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 12px;background:var(--counter-bg);color:var(--counter-ink);display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:end}
+.top h1{margin:0;font-size:13px;font-weight:500;letter-spacing:.08em;opacity:.75}
+.status{justify-self:end;font-size:11px;padding:2px 8px;border-radius:99px;background:rgba(255,255,255,.1);white-space:nowrap}
+.status[data-s="saving"]{background:rgba(228,141,58,.3)}
+.status[data-s="error"]{background:rgba(224,120,108,.4)}
+.odo{display:flex;gap:3px;align-items:center}
+.odo span{display:inline-grid;place-items:center;width:1.35em;height:1.75em;background:var(--counter-cell);border-radius:3px;font-family:var(--mono);font-size:20px;font-weight:600;box-shadow:inset 0 -8px 10px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.06)}
+.odo span.last{background:#F4F1E8;color:#1D2622}
+.odo small{margin-left:6px;font-size:11px;opacity:.6}
+.total{text-align:right}
+.total .lbl{font-size:11px;opacity:.65}
+.total .val{font-family:var(--mono);font-size:26px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+
+.card{background:var(--surface);border-radius:14px;box-shadow:var(--shadow);padding:16px;display:flex;flex-direction:column;gap:14px}
+.card h2{margin:0;font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+.card h2 .sub{font-size:12px;font-weight:400;color:var(--ink3)}
+label.f{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:500;color:var(--ink2);letter-spacing:.02em}
+input.in,select.in,textarea.in{width:100%;min-height:46px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:16px}
+input.in:focus,select.in:focus,textarea.in:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+input.in.big{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:.06em;font-variant-numeric:tabular-nums}
+input.in[readonly]{background:var(--sunk);color:var(--ink2)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.route{display:grid;gap:6px}
+.swap{justify-self:center;border:none;background:var(--sunk);border-radius:99px;width:34px;height:34px;display:grid;place-items:center;cursor:pointer;color:var(--ink2)}
+
+.meter{background:var(--sunk);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.split{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.split input{text-align:right}
+.split .c input{border-color:var(--commute);background:var(--commute-soft)}
+.split .b input{border-color:var(--biz);background:var(--biz-soft)}
+.split .c span{color:var(--commute)} .split .b span{color:var(--biz)}
+.preview{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;color:var(--ink2)}
+.preview b{font-family:var(--mono);font-size:18px;color:var(--ink)}
+.msg{font-size:13px;color:var(--danger)}
+.msg:empty{display:none}
+.hint{font-size:12px;color:var(--ink3);margin:0}
+.btn{min-height:50px;border:none;border-radius:12px;font-weight:700;font-size:16px;cursor:pointer;background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:var(--sunk);color:var(--ink)}
+.btn.sm{min-height:42px;font-size:14px;font-weight:500;padding-inline:14px}
+.btn:disabled{opacity:.5}
+.btn:active{transform:translateY(1px)}
+.actions{display:grid;grid-template-columns:1fr;gap:8px}
+.actions.two{grid-template-columns:auto 1fr}
+
+.sum{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile{border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.tile .l{font-size:12px;font-weight:500}
+.tile .v{font-family:var(--mono);font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.tile .k{font-size:12px;color:var(--ink2);font-family:var(--mono)}
+.tile.c{background:var(--commute-soft)} .tile.c .l{color:var(--commute)}
+.tile.b{background:var(--biz-soft)} .tile.b .l{color:var(--biz)}
+.tile.all{grid-column:1/-1;background:var(--accent-soft);flex-direction:row;justify-content:space-between;align-items:center;gap:8px}
+.tile.all .v{font-size:26px}
+
+.monthbar{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center}
+.monthbar input{text-align:center}
+.day{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.day:first-child{border-top:none}
+.dayhead{display:flex;justify-content:space-between;align-items:baseline;padding:10px 0 4px;font-size:13px;font-weight:700}
+.dayhead .num{font-family:var(--mono);font-weight:500;color:var(--ink2);font-size:12px}
+.trip{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 0;align-items:center}
+.trip .where{font-weight:500;font-size:15px}
+.trip .where i{font-style:normal;color:var(--ink3);padding-inline:2px}
+.trip .amt{font-family:var(--mono);font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.trip .meta{font-size:12px;color:var(--ink3);font-family:var(--mono);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pill{font-family:var(--sans);font-size:11px;padding:1px 7px;border-radius:99px}
+.pill.c{background:var(--commute-soft);color:var(--commute)}
+.pill.b{background:var(--biz-soft);color:var(--biz)}
+.ops{display:flex;gap:6px;justify-content:flex-end}
+.op{border:1px solid var(--line);background:var(--surface);border-radius:8px;min-height:34px;padding:0 10px;font-size:12px;cursor:pointer;color:var(--ink2)}
+.op.arm{background:var(--danger);border-color:var(--danger);color:#fff}
+.trip.editing{background:var(--accent-soft);margin-inline:-8px;padding-inline:8px;border-radius:8px}
+.empty{padding:20px 8px;text-align:center;color:var(--ink3);font-size:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sendline{font-size:12px;color:var(--ink3);margin:0}
+
+.rank{display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center;font-size:14px}
+.rank .bar{height:10px;border-radius:99px;background:var(--sunk);overflow:hidden}
+.rank .bar i{display:block;height:100%;background:var(--accent);border-radius:99px}
+.rank .n{font-family:var(--mono);font-weight:600;text-align:right}
+
+details.card{gap:0}
+details.card>summary{list-style:none;cursor:pointer;font-weight:700;font-size:16px;display:flex;justify-content:space-between;align-items:center}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary::after{content:"＋";color:var(--ink3);font-weight:400}
+details.card[open]>summary::after{content:"－"}
+.settings{display:flex;flex-direction:column;gap:14px;padding-top:14px}
+.group{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:14px}
+.group h3{margin:0;font-size:13px;font-weight:700;color:var(--ink2)}
+.placeedit{display:flex;flex-wrap:wrap;gap:6px}
+.placeedit .chip{display:inline-flex;gap:6px;align-items:center;cursor:default}
+.placeedit .chip button{border:none;background:none;padding:0 2px;cursor:pointer;color:var(--ink3);font-size:15px;line-height:1}
+.addplace{display:grid;grid-template-columns:1fr auto;gap:8px}
+.check{display:flex;gap:10px;align-items:center;font-size:14px}
+.check input{width:22px;height:22px;accent-color:var(--accent)}
+pre.code{margin:0;background:var(--sunk);border-radius:10px;padding:12px;font-family:var(--mono);font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre}
+ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:flex;flex-direction:column;gap:4px}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:99px;font-size:14px;z-index:20;max-width:calc(100% - 32px);text-align:center}
+@media (prefers-reduced-motion:no-preference){.trip.new{animation:flash 1.2s ease-out}@keyframes flash{from{background:var(--accent-soft)}to{background:transparent}}}
+
+/* 印刷用の精算書 */
+#print{display:none}
+@media print{
+  @page{size:A4;margin:14mm}
+  body{background:#fff;color:#000;padding:0}
+  .wrap,.toast{display:none!important}
+  #print{display:block;font-size:10.5pt}
+  #print h1{font-size:16pt;margin:0 0 4mm}
+  #print .meta{display:flex;justify-content:space-between;margin-bottom:4mm}
+  #print table{width:100%;border-collapse:collapse}
+  #print th,#print td{border:1px solid #888;padding:1.5mm 2mm}
+  #print th{background:#eee;font-weight:700}
+  #print td.r{text-align:right;font-variant-numeric:tabular-nums}
+  #print tfoot td{font-weight:700;background:#f4f4f4}
+  #print .sign{margin-top:8mm;display:flex;justify-content:flex-end;gap:0}
+  #print .sign div{border:1px solid #888;width:24mm;height:24mm;font-size:8pt;text-align:center;padding-top:1mm}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>走行メーター帳</h1>
+    <span class="status" id="status" data-s="idle">この端末に保存</span>
+    <div><div class="odo" id="odo" aria-label="最新メーター"></div></div>
+    <div class="total">
+      <div class="lbl" id="totalLbl">今月の精算額</div>
+      <div class="val" id="totalVal">¥0</div>
+    </div>
+  </header>
+
+  <form class="card" id="form" autocomplete="off">
+    <h2 id="formTitle">走行を記録</h2>
+    <label class="f">日付<input class="in" type="date" id="fDate" required></label>
+    <div class="route">
+      <label class="f">出発<input class="in" id="fFrom" placeholder="場所を入力 または下から選択"></label>
+      <div class="chips" id="fromChips"></div>
+      <button type="button" class="swap" id="swap" aria-label="出発と到着を入れ替え">⇅</button>
+      <label class="f">到着<input class="in" id="fTo" placeholder="場所を入力 または下から選択"></label>
+      <div class="chips" id="toChips"></div>
+    </div>
+    <div class="meter">
+      <label class="f">出発メーター<input class="in big" id="fStart" inputmode="numeric" pattern="[0-9]*" placeholder="000000"></label>
+      <label class="f">到着メーター<input class="in big" id="fEnd" inputmode="numeric" pattern="[0-9]*" placeholder="000000"></label>
+      <div class="split">
+        <label class="f"><span>総移動 km</span><input class="in" id="fKm" inputmode="numeric" pattern="[0-9]*" placeholder="0"></label>
+        <label class="f c"><span>通勤 km</span><input class="in" id="fC" inputmode="numeric" pattern="[0-9]*" placeholder="0"></label>
+        <label class="f b"><span>業務 km</span><input class="in" id="fB" readonly tabindex="-1" placeholder="0"></label>
+      </div>
+      <div class="preview"><span id="pvRate"></span><span>小計 <b id="pvAmt">¥0</b></span></div>
+    </div>
+    <div class="msg" id="fMsg" role="alert"></div>
+    <div class="actions" id="actions">
+      <button type="button" class="btn ghost sm" id="cancelEdit" hidden>やめる</button>
+      <button type="submit" class="btn" id="submitBtn">記録する</button>
+    </div>
+  </form>
+
+  <section class="card">
+    <div class="monthbar">
+      <button type="button" class="btn ghost sm" id="prevM" aria-label="前の月">‹</button>
+      <input class="in" type="month" id="viewMonth">
+      <button type="button" class="btn ghost sm" id="nextM" aria-label="次の月">›</button>
+    </div>
+    <div class="sum" id="sum"></div>
+    <div id="list"></div>
+    <button type="button" class="btn sm" id="sheetBtn">スプレッドシートに送信</button>
+    <p class="sendline" id="sendLine"></p>
+    <div class="grid2">
+      <button type="button" class="btn ghost sm" id="printBtn">印刷 / PDF</button>
+      <button type="button" class="btn ghost sm" id="csvBtn">CSVで保存</button>
+    </div>
+    <button type="button" class="btn ghost sm" id="copyBtn">表をコピー（Excelに貼り付け用）</button>
+  </section>
+
+  <section class="card">
+    <h2>訪問先 <span class="sub" id="rankSub"></span></h2>
+    <div class="rank" id="rank"></div>
+  </section>
+
+  <details class="card" id="settingsBox">
+    <summary>設定</summary>
+    <div class="settings">
+      <label class="f">氏名<input class="in" id="sName" placeholder="例：岡田 勉"></label>
+      <div class="row">
+        <label class="f">通勤レート（円/km）<input class="in" id="sCRate" inputmode="decimal"></label>
+        <label class="f">業務レート（円/km）<input class="in" id="sBRate" inputmode="decimal"></label>
+      </div>
+      <div class="row">
+        <label class="f">通勤の起点<select class="in" id="sHome"></select></label>
+        <label class="f">片道の通勤距離（km）<input class="in" id="sCommute" inputmode="numeric" pattern="[0-9]*"></label>
+      </div>
+      <p class="hint">起点を発着する走行では、片道の通勤距離までを「通勤」、残りを「業務」に振り分けます。0 なら全て業務です。記録ごとに通勤kmは手で直せます。</p>
+
+      <div class="group">
+        <h3>よく使う場所</h3>
+        <div class="placeedit" id="placeEdit"></div>
+        <div class="addplace">
+          <input class="in" id="newPlace" placeholder="場所名を追加（例：成田本社）">
+          <button type="button" class="btn sm" id="addPlace">追加</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>スプレッドシート連携</h3>
+        <label class="f">送信先URL（Apps Scriptのウェブアプリ）<input class="in" id="sGas" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <label class="check"><input type="checkbox" id="sAuto"> 記録・編集・削除のたびに自動で送信する</label>
+        <details>
+          <summary class="hint" style="cursor:pointer">送信先URLの作り方</summary>
+          <ol class="steps">
+            <li>Googleスプレッドシートを新しく作ります（会社で1つ作って全員が同じURLを使うこともできます）。</li>
+            <li>メニューの「拡張機能」→「Apps Script」を開きます。</li>
+            <li>最初からある文字を全部消し、下のコードを貼り付けて保存します。</li>
+            <li>「デプロイ」→「新しいデプロイ」→種類「ウェブアプリ」。実行ユーザー「自分」、アクセスできるユーザー「全員」でデプロイします。</li>
+            <li>表示された「ウェブアプリのURL」を上の欄に貼り付けます。</li>
+          </ol>
+          <pre class="code" id="gasCode"></pre>
+          <button type="button" class="btn ghost sm" id="copyGas" style="margin-top:8px;width:100%">コードをコピー</button>
+        </details>
+        <p class="hint">送信すると「2026-08_氏名」という名前のシートに、その月の明細を丸ごと書き込みます。何度送っても上書きされるだけです。</p>
+      </div>
+
+      <div class="group">
+        <h3>バックアップ</h3>
+        <p class="hint">記録はこのiPhoneの中だけに保存されています。機種変更の前や月に1回は、バックアップをファイルに書き出してください。</p>
+        <div class="grid2">
+          <button type="button" class="btn ghost sm" id="backupBtn">書き出す</button>
+          <label class="btn ghost sm" style="display:grid;place-items:center;cursor:pointer">読み込む<input type="file" id="restoreFile" accept=".json,application/json" hidden></label>
+        </div>
+        <p class="hint" id="restoreMsg"></p>
+      </div>
+      <p class="hint" id="verLine"></p>
+    </div>
+  </details>
+</div>
+<div class="toast" id="toast" hidden></div>
+<div id="print"></div>
+
+<script>
+(() => {
+const APP_VERSION = '1.0.0';
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2, '0');
+const yen = n => '¥' + Math.round(n || 0).toLocaleString('ja-JP');
+const km = n => (n || 0).toLocaleString('ja-JP');
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const ymOf = d => d.slice(0, 7);
+const shiftYm = (ym, k) => { let [y, m] = ym.split('-').map(Number); m += k; while (m < 1) { m += 12; y--; } while (m > 12) { m -= 12; y++; } return `${y}-${pad(m)}`; };
+const toNum = v => { const s = String(v ?? '').replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[^\d.]/g, ''); return s === '' ? null : Number(s); };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const DEFAULTS = {
+  name: '', cRate: 29, bRate: 29, home: '自宅', commuteKm: 0,
+  places: ['自宅', '会社'], lastMeter: null, lastPlace: '', gasUrl: '', autoSend: false
+};
+const S = { settings: { ...DEFAULTS }, viewYm: ymOf(todayStr()), entries: [], editingId: null, cManual: false, justAdded: null };
+
+/* ---------- 保存（この端末） ---------- */
+const K = 'meterbook:';
+const lsGet = k => { try { return JSON.parse(localStorage.getItem(K + k) || 'null'); } catch { return null; } };
+const lsPut = (k, v) => { try { localStorage.setItem(K + k, JSON.stringify(v)); return true; } catch { return false; } };
+function allMonthKeys() {
+  const out = [];
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(K + 'm-')) out.push(k.slice(K.length + 2)); } } catch {}
+  return out.sort();
+}
+const getMonth = ym => { const d = lsGet('m-' + ym); return d && Array.isArray(d.entries) ? d.entries.slice() : []; };
+function setStatus(s, t) { const el = $('#status'); el.dataset.s = s; el.textContent = t; }
+function saveSettings() { if (!lsPut('settings', S.settings)) storageError(); }
+function saveMonth(ym, entries) {
+  const ok = lsPut('m-' + ym, { entries, updatedAt: new Date().toISOString() });
+  if (!ok) storageError();
+  else if (S.settings.autoSend && S.settings.gasUrl) sendSheet(ym, entries, true);
+  return ok;
+}
+function storageError() { setStatus('error', '保存できません'); toast('保存できませんでした。プライベートブラウズを解除してください。'); }
+
+/* ---------- 計算 ---------- */
+function autoCommute(from, to, total) {
+  const st = S.settings, c = Number(st.commuteKm) || 0;
+  if (!c || total == null) return 0;
+  return (from === st.home || to === st.home) ? Math.min(total, c) : 0;
+}
+const amtC = e => Math.round((e.commuteKm || 0) * (e.cRate ?? S.settings.cRate));
+const amtB = e => Math.round((e.bizKm || 0) * (e.bRate ?? S.settings.bRate));
+const sortEntries = arr => arr.slice().sort((a, b) => a.date.localeCompare(b.date) || (a.startM ?? 0) - (b.startM ?? 0) || (a.ts || 0) - (b.ts || 0));
+function totals(list) {
+  let c = 0, b = 0, ck = 0, bk = 0;
+  for (const e of list) { c += amtC(e); b += amtB(e); ck += e.commuteKm || 0; bk += e.bizKm || 0; }
+  return { c, b, ck, bk, all: c + b };
+}
+
+/* ---------- 表示 ---------- */
+function renderOdo() {
+  const m = S.settings.lastMeter;
+  const digits = m == null ? '------' : String(Math.round(m)).padStart(6, '0');
+  $('#odo').innerHTML = [...digits].map((d, i, a) => `<span class="${i === a.length - 1 ? 'last' : ''}">${d}</span>`).join('') + '<small>km</small>';
+}
+function renderSummary() {
+  const t = totals(S.entries);
+  const [y, m] = S.viewYm.split('-');
+  $('#totalLbl').textContent = `${Number(m)}月の精算額`;
+  $('#totalVal').textContent = yen(t.all);
+  $('#sum').innerHTML = `
+    <div class="tile c"><span class="l">通勤費</span><span class="v">${yen(t.c)}</span><span class="k">${km(t.ck)} km</span></div>
+    <div class="tile b"><span class="l">業務交通費</span><span class="v">${yen(t.b)}</span><span class="k">${km(t.bk)} km</span></div>
+    <div class="tile all"><span class="l">${y}年${Number(m)}月 支給額<br>${S.entries.length}件・${km(t.ck + t.bk)} km</span><span class="v">${yen(t.all)}</span></div>`;
+}
+const WD = ['日', '月', '火', '水', '木', '金', '土'];
+function renderList() {
+  const list = sortEntries(S.entries);
+  if (!list.length) { $('#list').innerHTML = `<div class="empty">この月の記録はまだありません。<br>上のフォームから走行を記録してください。</div>`; return; }
+  const byDay = {};
+  for (const e of list) (byDay[e.date] ||= []).push(e);
+  $('#list').innerHTML = Object.entries(byDay).map(([d, arr]) => {
+    const dt = new Date(d + 'T00:00:00');
+    const dayAmt = arr.reduce((s, e) => s + amtC(e) + amtB(e), 0);
+    const dayKm = arr.reduce((s, e) => s + (e.km || 0), 0);
+    return `<div class="day">
+      <div class="dayhead"><span>${dt.getMonth() + 1}/${dt.getDate()}（${WD[dt.getDay()]}）</span><span class="num">${km(dayKm)} km · ${yen(dayAmt)}</span></div>
+      ${arr.map(e => `<div class="trip${S.editingId === e.id ? ' editing' : ''}${S.justAdded === e.id ? ' new' : ''}">
+        <div class="where">${esc(e.from) || '—'}<i>→</i>${esc(e.to) || '—'}</div>
+        <div class="amt">${yen(amtC(e) + amtB(e))}</div>
+        <div class="meta"><span>${e.startM != null && e.endM != null ? e.startM + '→' + e.endM : ''}</span><span>${km(e.km)} km</span>
+          ${e.commuteKm ? `<span class="pill c">通勤 ${e.commuteKm}</span>` : ''}${e.bizKm ? `<span class="pill b">業務 ${e.bizKm}</span>` : ''}</div>
+        <div class="ops"><button type="button" class="op" data-edit="${e.id}">編集</button><button type="button" class="op" data-del="${e.id}">削除</button></div>
+      </div>`).join('')}
+    </div>`;
+  }).join('');
+  S.justAdded = null;
+}
+function renderRank() {
+  const cnt = {};
+  for (const e of S.entries) if (e.to && e.to !== S.settings.home) cnt[e.to] = (cnt[e.to] || 0) + 1;
+  const rows = Object.entries(cnt).sort((a, b) => b[1] - a[1]);
+  $('#rankSub').textContent = `${Number(S.viewYm.slice(5))}月の到着回数`;
+  if (!rows.length) { $('#rank').innerHTML = `<div class="empty" style="grid-column:1/-1">記録がたまると、よく行く場所が並びます。</div>`; return; }
+  const max = rows[0][1];
+  $('#rank').innerHTML = rows.map(([p, n]) => `<span>${esc(p)}</span><span class="bar"><i style="width:${(n / max * 100).toFixed(1)}%"></i></span><span class="n">${n}回</span>`).join('');
+}
+function chipRow(el, current, exclude, target) {
+  el.innerHTML = S.settings.places.filter(p => p !== exclude).map(p =>
+    `<button type="button" class="chip" data-target="${target}" data-p="${esc(p)}" aria-pressed="${p === current}">${esc(p)}</button>`).join('');
+}
+function renderChips() {
+  const f = $('#fFrom').value.trim(), t = $('#fTo').value.trim();
+  chipRow($('#fromChips'), f, null, 'fFrom');
+  chipRow($('#toChips'), t, f, 'fTo');
+}
+function renderSettings() {
+  const st = S.settings;
+  $('#sName').value = st.name || '';
+  $('#sCRate').value = st.cRate;
+  $('#sBRate').value = st.bRate;
+  $('#sCommute').value = st.commuteKm || 0;
+  $('#sGas').value = st.gasUrl || '';
+  $('#sAuto').checked = !!st.autoSend;
+  const homeOpts = st.places.includes(st.home) ? st.places : [st.home, ...st.places];
+  $('#sHome').innerHTML = homeOpts.map(p => `<option ${p === st.home ? 'selected' : ''}>${esc(p)}</option>`).join('');
+  $('#placeEdit').innerHTML = st.places.map((p, i) => `<span class="chip">${esc(p)}<button type="button" data-rm="${i}" aria-label="${esc(p)}を削除">×</button></span>`).join('');
+}
+function renderSendLine() {
+  const st = S.settings;
+  $('#sheetBtn').hidden = !st.gasUrl;
+  const last = (lsGet('sent') || {})[S.viewYm];
+  $('#sendLine').hidden = !st.gasUrl;
+  $('#sendLine').textContent = last ? `前回の送信：${new Date(last).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${st.autoSend ? '（自動送信オン）' : ''}` : (st.autoSend ? '自動送信オン' : 'この月はまだ送信していません');
+}
+function renderAll() { renderOdo(); renderSummary(); renderList(); renderRank(); renderChips(); renderSendLine(); calc(); }
+
+/* ---------- フォーム ---------- */
+function calc(src) {
+  const start = toNum($('#fStart').value), end = toNum($('#fEnd').value);
+  let total = toNum($('#fKm').value);
+  if (src === 'km' && start != null && total != null) $('#fEnd').value = start + total;
+  else if (src !== 'km' && src !== 'c' && start != null && end != null) { total = Math.max(0, end - start); $('#fKm').value = total; }
+  total = toNum($('#fKm').value);
+  if (!S.cManual) $('#fC').value = total == null ? '' : autoCommute($('#fFrom').value.trim(), $('#fTo').value.trim(), total);
+  let c = toNum($('#fC').value) || 0;
+  if (total != null && c > total) { c = total; $('#fC').value = c; }
+  $('#fB').value = total == null ? '' : total - c;
+  const e = { commuteKm: c, bizKm: total == null ? 0 : total - c };
+  $('#pvRate').textContent = `1kmあたり 通勤${S.settings.cRate}円・業務${S.settings.bRate}円`;
+  $('#pvAmt').textContent = yen(amtC(e) + amtB(e));
+}
+function resetForm(keepDate) {
+  const d = keepDate ? $('#fDate').value : todayStr();
+  $('#form').reset();
+  $('#fDate').value = d || todayStr();
+  $('#fFrom').value = S.settings.lastPlace || '';
+  $('#fStart').value = S.settings.lastMeter ?? '';
+  S.editingId = null; S.cManual = false;
+  $('#formTitle').textContent = '走行を記録';
+  $('#submitBtn').textContent = '記録する';
+  $('#cancelEdit').hidden = true; $('#actions').classList.remove('two');
+  $('#fMsg').textContent = '';
+  renderChips(); calc();
+}
+function loadIntoForm(e) {
+  S.editingId = e.id; S.cManual = true;
+  $('#fDate').value = e.date; $('#fFrom').value = e.from; $('#fTo').value = e.to;
+  $('#fStart').value = e.startM ?? ''; $('#fEnd').value = e.endM ?? '';
+  $('#fKm').value = e.km ?? ''; $('#fC').value = e.commuteKm ?? 0;
+  $('#formTitle').textContent = `${e.date.slice(5).replace('-', '/')} の記録を編集`;
+  $('#submitBtn').textContent = '更新する';
+  $('#cancelEdit').hidden = false; $('#actions').classList.add('two');
+  renderChips(); calc(); renderList();
+  $('#form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function onSubmit(ev) {
+  ev.preventDefault();
+  const msg = $('#fMsg'); msg.textContent = '';
+  const date = $('#fDate').value, from = $('#fFrom').value.trim(), to = $('#fTo').value.trim();
+  const startM = toNum($('#fStart').value), endM = toNum($('#fEnd').value), total = toNum($('#fKm').value);
+  const c = Math.min(toNum($('#fC').value) || 0, total || 0);
+  if (!date) return msg.textContent = '日付を選んでください。';
+  if (!from || !to) return msg.textContent = '出発と到着を入れてください。';
+  if (startM != null && endM != null && endM <= startM) return msg.textContent = `到着メーターは出発メーター（${startM}）より大きい数字にしてください。`;
+  if (!total) return msg.textContent = '到着メーターか総移動kmを入れてください。';
+  const wasEdit = !!S.editingId;
+  const old = wasEdit ? S.entries.find(x => x.id === S.editingId) : null;
+  const entry = {
+    id: S.editingId || uid(), date, from, to, startM, endM, km: total, commuteKm: c, bizKm: total - c,
+    cRate: old?.cRate ?? Number(S.settings.cRate), bRate: old?.bRate ?? Number(S.settings.bRate), ts: old?.ts ?? Date.now()
+  };
+  const ym = ymOf(date);
+  if (old && ymOf(old.date) !== ym) {
+    const rest = S.entries.filter(x => x.id !== entry.id);
+    saveMonth(S.viewYm, rest);
+  }
+  const list = getMonth(ym);
+  const i = list.findIndex(x => x.id === entry.id);
+  if (i >= 0) list[i] = entry; else list.push(entry);
+  if (!saveMonth(ym, list)) return;
+  if (endM != null && endM >= (S.settings.lastMeter ?? 0)) S.settings.lastMeter = endM;
+  if (!wasEdit) S.settings.lastPlace = to;
+  saveSettings();
+  S.justAdded = entry.id;
+  toast(wasEdit ? '更新しました' : `記録しました（${entry.km} km・${yen(amtC(entry) + amtB(entry))}）`);
+  resetForm(true);
+  setView(ym);
+}
+function deleteEntry(id) {
+  const list = S.entries.filter(x => x.id !== id);
+  if (!saveMonth(S.viewYm, list)) return;
+  if (S.editingId === id) resetForm(true);
+  S.entries = list; renderAll();
+  toast('削除しました');
+}
+function setView(ym) {
+  S.viewYm = ym; $('#viewMonth').value = ym;
+  S.entries = getMonth(ym);
+  renderAll();
+}
+
+/* ---------- 出力 ---------- */
+const HEAD = ['日付', '出発', '到着', '出発メーター', '到着メーター', '総距離km', '通勤km', '業務km', '通勤費', '業務費', '小計'];
+function tableRows(entries) {
+  const rows = sortEntries(entries).map(e => [e.date, e.from, e.to, e.startM ?? '', e.endM ?? '', e.km, e.commuteKm, e.bizKm, amtC(e), amtB(e), amtC(e) + amtB(e)]);
+  const t = totals(entries);
+  rows.push(['合計', '', '', '', '', t.ck + t.bk, t.ck, t.bk, t.c, t.b, t.all]);
+  return [HEAD, ...rows];
+}
+async function copyTable() {
+  if (!S.entries.length) return toast('この月の記録がありません');
+  const tsv = tableRows(S.entries).map(r => r.join('\t')).join('\n');
+  try { await navigator.clipboard.writeText(tsv); toast('コピーしました。Excelやスプレッドシートに貼り付けできます'); }
+  catch { toast('コピーできませんでした'); }
+}
+async function shareOrDownload(filename, text, type) {
+  const blob = new Blob([text], { type });
+  const file = new File([blob], filename, { type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: filename }); return true; }
+    catch (e) { if (e && e.name === 'AbortError') return false; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  return true;
+}
+const nameTag = () => S.settings.name ? '_' + S.settings.name.replace(/\s+/g, '') : '';
+function saveCsv() {
+  if (!S.entries.length) return toast('この月の記録がありません');
+  const q = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+  const csv = '﻿' + tableRows(S.entries).map(r => r.map(q).join(',')).join('\r\n');
+  shareOrDownload(`交通費_${S.viewYm}${nameTag()}.csv`, csv, 'text/csv');
+}
+function printSheet() {
+  if (!S.entries.length) return toast('この月の記録がありません');
+  const [y, m] = S.viewYm.split('-');
+  const rows = tableRows(S.entries);
+  const body = rows.slice(1, -1), foot = rows[rows.length - 1];
+  const r = new Set([3, 4, 5, 6, 7, 8, 9, 10]);
+  const cell = (v, i) => `<td class="${r.has(i) ? 'r' : ''}">${esc(typeof v === 'number' && i >= 8 ? yen(v) : v)}</td>`;
+  $('#print').innerHTML = `
+    <h1>交通費精算書　${y}年${Number(m)}月分</h1>
+    <div class="meta"><span>氏名：${esc(S.settings.name || '')}</span><span>単価　通勤 ${S.settings.cRate}円/km・業務 ${S.settings.bRate}円/km</span></div>
+    <table><thead><tr>${HEAD.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${body.map(row => `<tr>${row.map(cell).join('')}</tr>`).join('')}</tbody>
+    <tfoot><tr>${foot.map(cell).join('')}</tr></tfoot></table>
+    <div class="sign"><div>承認</div><div>確認</div><div>申請</div></div>`;
+  window.print();
+}
+async function sendSheet(ym, entries, silent) {
+  const url = S.settings.gasUrl;
+  if (!url) return;
+  if (!silent) { $('#sheetBtn').disabled = true; $('#sheetBtn').textContent = '送信中…'; }
+  const payload = { app: 'meterbook', name: S.settings.name || '未設定', month: ym, rows: tableRows(entries) };
+  try {
+    await fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+    const sent = lsGet('sent') || {}; sent[ym] = Date.now(); lsPut('sent', sent);
+    if (!silent) toast(`送信しました（シート名：${ym}_${payload.name}）`);
+  } catch {
+    if (!silent) toast('送信できませんでした。電波の良い所でもう一度お試しください');
+    else setStatus('error', '送信できませんでした');
+  } finally {
+    if (!silent) { $('#sheetBtn').disabled = false; $('#sheetBtn').textContent = 'スプレッドシートに送信'; }
+    renderSendLine();
+  }
+}
+
+/* ---------- バックアップ ---------- */
+function backup() {
+  const months = {};
+  for (const ym of allMonthKeys()) months[ym] = getMonth(ym);
+  const n = Object.values(months).reduce((s, a) => s + a.length, 0);
+  if (!n) return toast('まだ記録がありません');
+  const data = { app: 'meterbook', version: 1, exportedAt: new Date().toISOString(), settings: S.settings, months };
+  shareOrDownload(`メーター帳バックアップ_${todayStr()}${nameTag()}.json`, JSON.stringify(data), 'application/json')
+    .then(ok => { if (ok) { lsPut('backupAt', Date.now()); $('#restoreMsg').textContent = `${Object.keys(months).length}か月分・${n}件を書き出しました。`; } });
+}
+async function restore(file) {
+  const msg = $('#restoreMsg');
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data || data.app !== 'meterbook' || typeof data.months !== 'object') throw 0;
+    let added = 0;
+    for (const [ym, arr] of Object.entries(data.months)) {
+      if (!/^\d{4}-\d{2}$/.test(ym) || !Array.isArray(arr)) continue;
+      const cur = getMonth(ym); const ids = new Set(cur.map(e => e.id));
+      for (const e of arr) if (e && e.id && !ids.has(e.id)) { cur.push(e); added++; }
+      lsPut('m-' + ym, { entries: cur, updatedAt: new Date().toISOString() });
+    }
+    if (data.settings) {
+      const keep = S.settings;
+      S.settings = { ...DEFAULTS, ...data.settings, places: [...new Set([...(data.settings.places || []), ...keep.places])] };
+      if ((keep.lastMeter ?? 0) > (S.settings.lastMeter ?? 0)) S.settings.lastMeter = keep.lastMeter;
+      saveSettings();
+    }
+    msg.textContent = `${added}件を読み込みました（同じ記録は重複させていません）。`;
+    renderSettings(); resetForm(false); setView(S.viewYm);
+  } catch { msg.textContent = 'このファイルは読み込めません。メーター帳で書き出したバックアップを選んでください。'; }
+}
+
+/* ---------- GAS コード ---------- */
+const GAS = `// 走行メーター帳 → スプレッドシート受け取り用
+function doPost(e) {
+  var d = JSON.parse(e.postData.contents);
+  if (d.app !== 'meterbook' || !d.rows || !d.rows.length) {
+    return ContentService.createTextOutput('ng');
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var title = (d.month + '_' + String(d.name).replace(/[\\\\/?*\\[\\]:]/g, '')).slice(0, 90);
+  var sh = ss.getSheetByName(title) || ss.insertSheet(title);
+  sh.clear();
+  sh.getRange(1, 1, 1, 4).setValues([['氏名', d.name, '更新', new Date()]]);
+  sh.getRange(3, 1, d.rows.length, d.rows[0].length).setValues(d.rows);
+  sh.getRange(3, 1, 1, d.rows[0].length).setFontWeight('bold').setBackground('#eeeeee');
+  sh.getRange(2 + d.rows.length, 1, 1, d.rows[0].length).setFontWeight('bold');
+  sh.getRange(4, 9, d.rows.length - 1, 3).setNumberFormat('¥#,##0');
+  sh.setFrozenRows(3);
+  return ContentService.createTextOutput('ok');
+}`;
+
+/* ---------- 小物 ---------- */
+let toastT;
+function toast(t) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2800); }
+let setT;
+function settingsChanged() { clearTimeout(setT); setT = setTimeout(saveSettings, 400); calc(); renderSummary(); renderSendLine(); }
+
+/* ---------- イベント ---------- */
+$('#form').addEventListener('submit', onSubmit);
+$('#fStart').addEventListener('input', () => calc('start'));
+$('#fEnd').addEventListener('input', () => calc('end'));
+$('#fKm').addEventListener('input', () => calc('km'));
+$('#fC').addEventListener('input', () => { S.cManual = true; calc('c'); });
+for (const id of ['#fFrom', '#fTo']) $(id).addEventListener('input', () => { S.cManual = false; renderChips(); calc(); });
+$('#swap').addEventListener('click', () => { const a = $('#fFrom').value; $('#fFrom').value = $('#fTo').value; $('#fTo').value = a; S.cManual = false; renderChips(); calc(); });
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.chip[data-target]');
+  if (chip) { $('#' + chip.dataset.target).value = chip.dataset.p; S.cManual = false; renderChips(); calc(); return; }
+  const ed = e.target.closest('[data-edit]');
+  if (ed) { const x = S.entries.find(v => v.id === ed.dataset.edit); if (x) loadIntoForm(x); return; }
+  const del = e.target.closest('[data-del]');
+  if (del) {
+    if (del.classList.contains('arm')) { deleteEntry(del.dataset.del); return; }
+    del.classList.add('arm'); del.textContent = '削除する';
+    setTimeout(() => { if (del.isConnected) { del.classList.remove('arm'); del.textContent = '削除'; } }, 3000);
+    return;
+  }
+  const rm = e.target.closest('[data-rm]');
+  if (rm) { S.settings.places.splice(Number(rm.dataset.rm), 1); renderSettings(); renderChips(); settingsChanged(); }
+});
+$('#cancelEdit').addEventListener('click', () => { resetForm(true); renderList(); });
+$('#prevM').addEventListener('click', () => setView(shiftYm(S.viewYm, -1)));
+$('#nextM').addEventListener('click', () => setView(shiftYm(S.viewYm, 1)));
+$('#viewMonth').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) setView(e.target.value); });
+$('#copyBtn').addEventListener('click', copyTable);
+$('#csvBtn').addEventListener('click', saveCsv);
+$('#printBtn').addEventListener('click', printSheet);
+$('#sheetBtn').addEventListener('click', () => { if (!S.entries.length) return toast('この月の記録がありません'); sendSheet(S.viewYm, S.entries, false); });
+$('#backupBtn').addEventListener('click', backup);
+$('#restoreFile').addEventListener('change', e => { if (e.target.files[0]) restore(e.target.files[0]); e.target.value = ''; });
+$('#sName').addEventListener('input', e => { S.settings.name = e.target.value; settingsChanged(); });
+$('#sCRate').addEventListener('input', e => { const v = toNum(e.target.value); if (v != null) { S.settings.cRate = v; settingsChanged(); } });
+$('#sBRate').addEventListener('input', e => { const v = toNum(e.target.value); if (v != null) { S.settings.bRate = v; settingsChanged(); } });
+$('#sCommute').addEventListener('input', e => { S.settings.commuteKm = toNum(e.target.value) || 0; S.cManual = false; settingsChanged(); });
+$('#sHome').addEventListener('change', e => { S.settings.home = e.target.value; S.cManual = false; settingsChanged(); renderRank(); });
+$('#sGas').addEventListener('input', e => { S.settings.gasUrl = e.target.value.trim(); settingsChanged(); });
+$('#sAuto').addEventListener('change', e => { S.settings.autoSend = e.target.checked; settingsChanged(); });
+$('#copyGas').addEventListener('click', async () => { try { await navigator.clipboard.writeText(GAS); toast('コードをコピーしました'); } catch { toast('コピーできませんでした。長押しで選択してください'); } });
+function addPlace() {
+  const v = $('#newPlace').value.trim();
+  if (!v) return;
+  if (S.settings.places.includes(v)) return toast('すでに登録されています');
+  S.settings.places.push(v); $('#newPlace').value = '';
+  renderSettings(); renderChips(); settingsChanged();
+}
+$('#addPlace').addEventListener('click', addPlace);
+$('#newPlace').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addPlace(); } });
+
+/* ---------- 起動 ---------- */
+const saved = lsGet('settings');
+if (saved) S.settings = { ...DEFAULTS, ...saved, places: Array.isArray(saved.places) ? saved.places.slice() : DEFAULTS.places.slice() };
+else $('#settingsBox').open = true;
+$('#gasCode').textContent = GAS;
+$('#verLine').textContent = `バージョン ${APP_VERSION}`;
+renderSettings(); resetForm(false); setView(S.viewYm);
+const lastBk = lsGet('backupAt'), nRec = allMonthKeys().reduce((s, ym) => s + getMonth(ym).length, 0);
+if (nRec >= 20 && (!lastBk || Date.now() - lastBk > 30 * 864e5)) setTimeout(() => toast('1か月以上バックアップしていません。設定から書き出してください'), 1200);
+try { navigator.storage?.persist?.(); } catch {}
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
