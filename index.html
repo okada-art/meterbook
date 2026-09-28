@@ -149,6 +149,9 @@ details.card[open]>summary::after{content:"－"}
 .check input{width:22px;height:22px;accent-color:var(--accent)}
 pre.code{margin:0;background:var(--sunk);border-radius:10px;padding:12px;font-family:var(--mono);font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre}
 ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:flex;flex-direction:column;gap:4px}
+.remind{background:var(--accent-soft);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.remind p{margin:0;font-size:14px;font-weight:500}
+.remind .btn{background:var(--accent);color:var(--accent-ink)}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:99px;font-size:14px;z-index:20;max-width:calc(100% - 32px);text-align:center}
 @media (prefers-reduced-motion:no-preference){.trip.new{animation:flash 1.2s ease-out}@keyframes flash{from{background:var(--accent-soft)}to{background:transparent}}}
 
@@ -182,6 +185,11 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
       <div class="val" id="totalVal">¥0</div>
     </div>
   </header>
+
+  <div class="remind" id="remind" hidden>
+    <p id="remindText"></p>
+    <button type="button" class="btn sm" id="remindBtn"></button>
+  </div>
 
   <form class="card" id="form" autocomplete="off">
     <h2 id="formTitle">走行を記録</h2>
@@ -218,7 +226,9 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
     </div>
     <div class="sum" id="sum"></div>
     <div id="list"></div>
-    <button type="button" class="btn sm" id="sheetBtn">スプレッドシートに送信</button>
+    <button type="button" class="btn sm" id="slackBtn">CSVをSlackで送る</button>
+    <p class="sendline" id="slackLine"></p>
+    <button type="button" class="btn ghost sm" id="sheetBtn">スプレッドシートに送信</button>
     <p class="sendline" id="sendLine"></p>
     <div class="grid2">
       <button type="button" class="btn ghost sm" id="printBtn">印刷 / PDF</button>
@@ -235,7 +245,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
   <details class="card" id="settingsBox">
     <summary>設定</summary>
     <div class="settings">
-      <label class="f">氏名<input class="in" id="sName" placeholder="例：岡田 勉"></label>
+      <label class="f">氏名<input class="in" id="sName" placeholder="例：山田 太郎"></label>
       <div class="row">
         <label class="f">通勤レート（円/km）<input class="in" id="sCRate" inputmode="decimal"></label>
         <label class="f">業務レート（円/km）<input class="in" id="sBRate" inputmode="decimal"></label>
@@ -247,10 +257,18 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
       <p class="hint">起点を発着する走行では、片道の通勤距離までを「通勤」、残りを「業務」に振り分けます。0 なら全て業務です。記録ごとに通勤kmは手で直せます。</p>
 
       <div class="group">
+        <h3>Slackでの報告先</h3>
+        <label class="f">報告先のSlackリンク（任意）<input class="in" id="sSlackLink" inputmode="url" autocapitalize="off" placeholder="社内で案内されたリンクを貼り付け"></label>
+        <label class="f">相手の名前<input class="in" id="sSlackName" placeholder="例：山田 花子"></label>
+        <p class="hint" id="slackParsed"></p>
+        <p class="hint">明細画面の「CSVをSlackで送る」を押すと共有画面が開きます。「Slack」を選び、送り先に相手を選んで送信してください。報告文も一緒に入ります。リンクは任意で、共有画面が使えない端末のときに相手とのDMを直接開くために使います。</p>
+      </div>
+
+      <div class="group">
         <h3>よく使う場所</h3>
         <div class="placeedit" id="placeEdit"></div>
         <div class="addplace">
-          <input class="in" id="newPlace" placeholder="場所名を追加（例：成田本社）">
+          <input class="in" id="newPlace" placeholder="場所名を追加（例：本社）">
           <button type="button" class="btn sm" id="addPlace">追加</button>
         </div>
       </div>
@@ -292,7 +310,9 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.2.0';
+// Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
+const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
 const pad = n => String(n).padStart(2, '0');
 const yen = n => '¥' + Math.round(n || 0).toLocaleString('ja-JP');
@@ -306,7 +326,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 const DEFAULTS = {
   name: '', cRate: 29, bRate: 29, home: '自宅', commuteKm: 0,
-  places: ['自宅', '会社'], lastMeter: null, lastPlace: '', gasUrl: '', autoSend: false
+  places: ['自宅', '会社'], lastMeter: null, lastPlace: '', gasUrl: '', autoSend: false, slackTeam: SLACK_DEFAULT.team, slackUser: SLACK_DEFAULT.user, slackName: SLACK_DEFAULT.name
 };
 const S = { settings: { ...DEFAULTS }, viewYm: ymOf(todayStr()), entries: [], editingId: null, cManual: false, justAdded: null };
 
@@ -410,11 +430,22 @@ function renderSettings() {
   $('#sCommute').value = st.commuteKm || 0;
   $('#sGas').value = st.gasUrl || '';
   $('#sAuto').checked = !!st.autoSend;
+  $('#sSlackName').value = st.slackName || '';
+  $('#sSlackLink').value = st.slackUser && st.slackTeam ? `https://${st.slackTeam}.slack.com/team/${st.slackUser}` : '';
+  $('#slackParsed').textContent = st.slackUser && st.slackTeam ? `読み取り済み：${st.slackTeam} ／ ${st.slackUser}` : '';
   const homeOpts = st.places.includes(st.home) ? st.places : [st.home, ...st.places];
   $('#sHome').innerHTML = homeOpts.map(p => `<option ${p === st.home ? 'selected' : ''}>${esc(p)}</option>`).join('');
   $('#placeEdit').innerHTML = st.places.map((p, i) => `<span class="chip">${esc(p)}<button type="button" data-rm="${i}" aria-label="${esc(p)}を削除">×</button></span>`).join('');
 }
+function renderSlackLine() {
+  const st = S.settings;
+  const last = (lsGet('reported') || {})[S.viewYm];
+  $('#slackBtn').textContent = st.slackName ? `${(st.slackName || '').split(/\s+/)[0]}さんへCSVをSlackで送る` : 'CSVをSlackで送る';
+  $('#slackLine').textContent = last ? `前回この月を送った日時：${new Date(last).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+    : '押すと共有画面が開きます。「Slack」→ 送り先に相手を選んで送信してください';
+}
 function renderSendLine() {
+  renderSlackLine();
   const st = S.settings;
   $('#sheetBtn').hidden = !st.gasUrl;
   const last = (lsGet('sent') || {})[S.viewYm];
@@ -536,11 +567,14 @@ async function shareOrDownload(filename, text, type) {
   return true;
 }
 const nameTag = () => S.settings.name ? '_' + S.settings.name.replace(/\s+/g, '') : '';
+function buildCsv() {
+  const q = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+  return '﻿' + tableRows(S.entries).map(r => r.map(q).join(',')).join('\r\n');
+}
+const csvName = () => `交通費_${S.viewYm}${nameTag()}.csv`;
 function saveCsv() {
   if (!S.entries.length) return toast('この月の記録がありません');
-  const q = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
-  const csv = '﻿' + tableRows(S.entries).map(r => r.map(q).join(',')).join('\r\n');
-  shareOrDownload(`交通費_${S.viewYm}${nameTag()}.csv`, csv, 'text/csv');
+  shareOrDownload(csvName(), buildCsv(), 'text/csv');
 }
 function printSheet() {
   if (!S.entries.length) return toast('この月の記録がありません');
@@ -574,6 +608,70 @@ async function sendSheet(ym, entries, silent) {
     if (!silent) { $('#sheetBtn').disabled = false; $('#sheetBtn').textContent = 'スプレッドシートに送信'; }
     renderSendLine();
   }
+}
+
+/* ---------- Slackで報告 ---------- */
+const firstName = n => (n || '').split(/\s+/)[0];
+function reportText(withLines) {
+  const [y, m] = S.viewYm.split('-');
+  const t = totals(S.entries);
+  const st = S.settings;
+  const lines = !withLines ? [] : ['', '【明細】', ...sortEntries(S.entries).map(e => {
+    const dt = new Date(e.date + 'T00:00:00');
+    const kind = e.commuteKm && e.bizKm ? `通勤${e.commuteKm}・業務${e.bizKm}` : e.commuteKm ? '通勤' : '業務';
+    const meter = e.startM != null && e.endM != null ? `［${e.startM}→${e.endM}］` : '';
+    return `• ${dt.getMonth() + 1}/${dt.getDate()}(${WD[dt.getDay()]}) ${e.from}→${e.to}　${e.km}km（${kind}）${yen(amtC(e) + amtB(e))} ${meter}`;
+  })];
+  return [
+    st.slackName ? `${firstName(st.slackName)}さん` : 'ご担当者様',
+    `お疲れ様です。${st.name}です。`,
+    `${y}年${Number(m)}月分の走行距離をご報告いたします。${withLines ? '' : '明細はCSVを添付いたします。'}`, '',
+    `*総走行距離：${km(t.ck + t.bk)} km*（通勤 ${km(t.ck)} km／業務 ${km(t.bk)} km）`,
+    `*精算額：${yen(t.all)}*（通勤費 ${yen(t.c)}／業務交通費 ${yen(t.b)}）`,
+    `件数：${S.entries.length}件　単価：通勤 ${st.cRate}円/km・業務 ${st.bRate}円/km`,
+    ...lines, '',
+    'ご確認のほど、よろしくお願いいたします。'
+  ].join('\n');
+}
+async function slackReport() {
+  const st = S.settings;
+  if (!S.entries.length) return toast('この月の記録がありません');
+  if (!st.name) { $('#settingsBox').open = true; $('#sName').focus(); return toast('先に氏名を入れてください'); }
+  const markDone = () => { const done = lsGet('reported') || {}; done[S.viewYm] = Date.now(); lsPut('reported', done); renderSlackLine(); checkRemind(); };
+  // 1) CSVを添付して共有画面を開く（Slack → 相手を選んで送信）
+  const file = new File([buildCsv()], csvName(), { type: 'text/csv' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], text: reportText(false) });
+      markDone();
+    } catch (e) { if (!e || e.name !== 'AbortError') toast('共有できませんでした'); }
+    return;
+  }
+  // 2) ファイルを共有できない環境：明細入りの報告文をコピーしてDMを開く
+  if (!(st.slackUser && st.slackTeam)) { $('#settingsBox').open = true; $('#sSlackLink').focus(); return toast('この端末ではCSVを共有できません。報告先リンクを入れると文章で送れます'); }
+  try { await navigator.clipboard.writeText(reportText(true)); }
+  catch { return toast('報告文をコピーできませんでした。もう一度押してください'); }
+  markDone();
+  toast('報告文をコピーしました。Slackで長押し→ペーストして送信してください');
+  const team = st.slackTeam.replace(/^https?:\/\//, '').replace(/\.slack\.com.*$/, '');
+  setTimeout(() => { location.href = `https://${team}.slack.com/app_redirect?channel=${encodeURIComponent(st.slackUser)}`; }, 700);
+}
+
+/* ---------- 月末・月初のお知らせ ---------- */
+function checkRemind() {
+  const now = new Date(), day = now.getDate();
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const thisYm = ymOf(todayStr()), prevYm = shiftYm(thisYm, -1);
+  const done = lsGet('reported') || {};
+  const who = S.settings.slackName ? `${firstName(S.settings.slackName)}さん` : '経理';
+  let ym = null, text = '';
+  if (day <= 7 && !done[prevYm] && getMonth(prevYm).length) { ym = prevYm; text = `${Number(prevYm.slice(5))}月分の走行記録を、まだ${who}へ送っていません。`; }
+  else if (day >= lastDay - 1 && !done[thisYm] && getMonth(thisYm).length) { ym = thisYm; text = `月末です。${Number(thisYm.slice(5))}月分の記録がそろったら${who}へ送りましょう。`; }
+  $('#remind').hidden = !ym;
+  if (!ym) return;
+  $('#remindText').textContent = text;
+  $('#remindBtn').textContent = `${Number(ym.slice(5))}月分のCSVを${who}へ送る`;
+  $('#remindBtn').onclick = () => { if (S.viewYm !== ym) setView(ym); slackReport(); };
 }
 
 /* ---------- バックアップ ---------- */
@@ -667,6 +765,15 @@ $('#csvBtn').addEventListener('click', saveCsv);
 $('#printBtn').addEventListener('click', printSheet);
 $('#sheetBtn').addEventListener('click', () => { if (!S.entries.length) return toast('この月の記録がありません'); sendSheet(S.viewYm, S.entries, false); });
 $('#backupBtn').addEventListener('click', backup);
+$('#slackBtn').addEventListener('click', slackReport);
+$('#sSlackName').addEventListener('input', e => { S.settings.slackName = e.target.value.trim(); settingsChanged(); });
+$('#sSlackLink').addEventListener('input', e => {
+  // https://<ワークスペース>.slack.com/team/U… または …/archives/U… の形を読み取る
+  const m = e.target.value.trim().match(/^https?:\/\/([a-z0-9-]+)\.slack\.com\/(?:team|archives|app_redirect\?channel=)\/?([UW][A-Z0-9]{6,})/i);
+  if (m) { S.settings.slackTeam = m[1]; S.settings.slackUser = m[2].toUpperCase(); $('#slackParsed').textContent = `読み取り済み：${m[1]} ／ ${S.settings.slackUser}`; }
+  else { S.settings.slackTeam = ''; S.settings.slackUser = ''; $('#slackParsed').textContent = e.target.value.trim() ? 'このリンクは読み取れません。案内されたリンクをそのまま貼り付けてください。' : ''; }
+  settingsChanged();
+});
 $('#restoreFile').addEventListener('change', e => { if (e.target.files[0]) restore(e.target.files[0]); e.target.value = ''; });
 $('#sName').addEventListener('input', e => { S.settings.name = e.target.value; settingsChanged(); });
 $('#sCRate').addEventListener('input', e => { const v = toNum(e.target.value); if (v != null) { S.settings.cRate = v; settingsChanged(); } });
@@ -692,7 +799,8 @@ if (saved) S.settings = { ...DEFAULTS, ...saved, places: Array.isArray(saved.pla
 else $('#settingsBox').open = true;
 $('#gasCode').textContent = GAS;
 $('#verLine').textContent = `バージョン ${APP_VERSION}`;
-renderSettings(); resetForm(false); setView(S.viewYm);
+renderSettings(); resetForm(false); setView(S.viewYm); checkRemind();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkRemind(); });
 const lastBk = lsGet('backupAt'), nRec = allMonthKeys().reduce((s, ym) => s + getMonth(ym).length, 0);
 if (nRec >= 20 && (!lastBk || Date.now() - lastBk > 30 * 864e5)) setTimeout(() => toast('1か月以上バックアップしていません。設定から書き出してください'), 1200);
 try { navigator.storage?.persist?.(); } catch {}
