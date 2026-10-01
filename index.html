@@ -292,9 +292,11 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
       <div class="group">
         <h3>自動バックアップ（Googleスプレッドシート）</h3>
-        <label class="f">送信先URL（Apps Scriptのウェブアプリ）<input class="in" id="sGas" inputmode="url" autocapitalize="off" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <label class="f">送信先URL（Apps Scriptのウェブアプリ）<input class="in" id="sGas" inputmode="url" autocapitalize="off" placeholder="ここにURLを貼り付け"></label>
+        <p class="hint" id="gasState"></p>
         <label class="f">合言葉<input class="in" id="sKey" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-        <label class="f">Gemini版のスプレッドシートにも送る（任意・ウェブアプリのURL）<input class="in" id="sGemini" inputmode="url" autocapitalize="off" placeholder="https://script.google.com/macros/s/…/exec"></label>
+        <label class="f">Gemini版のスプレッドシートにも送る（任意・ウェブアプリのURL）<input class="in" id="sGemini" inputmode="url" autocapitalize="off" placeholder="ここにURLを貼り付け"></label>
+        <p class="hint" id="geminiState"></p>
         <label class="check"><input type="checkbox" id="sAuto"> 記録・編集・削除のたびに自動でバックアップする</label>
         <p class="hint" id="syncLine"></p>
         <button type="button" class="btn ghost sm" id="pullBtn">スプレッドシートから戻す</button>
@@ -331,7 +333,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.1';
 // Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
 const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
@@ -453,6 +455,7 @@ function renderSettings() {
   $('#sGas').value = st.gasUrl || '';
   $('#sKey').value = st.syncKey || '';
   $('#sGemini').value = st.geminiUrl || '';
+  renderUrlState();
   $('#sAuto').checked = !!st.autoSend;
   $('#sSlackName').value = st.slackName || '';
   $('#sSlackLink').value = st.slackUser && st.slackTeam ? `https://${st.slackTeam}.slack.com/team/${st.slackUser}` : '';
@@ -467,6 +470,13 @@ function renderSlackLine() {
   $('#slackBtn').textContent = st.slackName ? `${(st.slackName || '').split(/\s+/)[0]}さんへCSVをSlackで送る` : 'CSVをSlackで送る';
   $('#slackLine').textContent = last ? `前回この月を送った日時：${new Date(last).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
     : '押すと共有画面が開きます。「Slack」→ 送り先に相手を選んで送信してください';
+}
+function renderUrlState() {
+  const st = S.settings;
+  const ok = u => /^https:\/\/script\.google\.com\/macros\/s\/[\w-]{20,}\/exec/.test(u || '');
+  const line = u => !u ? '送信先：未設定' : ok(u) ? `送信先：設定済み（…${u.split('/s/')[1].slice(0, 8)}…）` : '送信先：URLの形が違います。「/exec」で終わるウェブアプリのURLを貼り付けてください';
+  $('#gasState').textContent = line(st.gasUrl);
+  $('#geminiState').textContent = line(st.geminiUrl);
 }
 function renderSendLine() {
   renderSlackLine();
@@ -882,7 +892,7 @@ fetch('Code.gs').then(r => r.ok ? r.text() : '').then(t => { GAS = t; $('#gasCod
 let toastT;
 function toast(t) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => el.hidden = true, 2800); }
 let setT;
-function settingsChanged() { clearTimeout(setT); setT = setTimeout(saveSettings, 400); calc(); renderSummary(); renderSendLine(); }
+function settingsChanged() { clearTimeout(setT); setT = setTimeout(saveSettings, 400); calc(); renderSummary(); renderSendLine(); renderUrlState(); }
 
 /* ---------- イベント ---------- */
 $('#form').addEventListener('submit', onSubmit);
