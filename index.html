@@ -294,6 +294,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
         <h3>自動バックアップ（Googleスプレッドシート）</h3>
         <label class="f">送信先URL（Apps Scriptのウェブアプリ）<input class="in" id="sGas" inputmode="url" autocapitalize="off" placeholder="https://script.google.com/macros/s/…/exec"></label>
         <label class="f">合言葉<input class="in" id="sKey" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+        <label class="f">Gemini版のスプレッドシートにも送る（任意・ウェブアプリのURL）<input class="in" id="sGemini" inputmode="url" autocapitalize="off" placeholder="https://script.google.com/macros/s/…/exec"></label>
         <label class="check"><input type="checkbox" id="sAuto"> 記録・編集・削除のたびに自動でバックアップする</label>
         <p class="hint" id="syncLine"></p>
         <button type="button" class="btn ghost sm" id="pullBtn">スプレッドシートから戻す</button>
@@ -330,7 +331,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.3.3';
+const APP_VERSION = '1.4.0';
 // Slackの報告先はコードに書かない（公開リポジトリのため）。使う人が設定画面でリンクを貼り付ける
 const SLACK_DEFAULT = { team: '', user: '', name: '' };
 const $ = s => document.querySelector(s);
@@ -346,7 +347,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 const DEFAULTS = {
   name: '', cRate: 29, bRate: 29, home: '自宅', commuteKm: 0,
-  places: ['自宅', '会社'], lastMeter: null, lastPlace: '', gasUrl: '', syncKey: '', autoSend: true, slackTeam: SLACK_DEFAULT.team, slackUser: SLACK_DEFAULT.user, slackName: SLACK_DEFAULT.name
+  places: ['自宅', '会社'], lastMeter: null, lastPlace: '', gasUrl: '', geminiUrl: '', syncKey: '', autoSend: true, slackTeam: SLACK_DEFAULT.team, slackUser: SLACK_DEFAULT.user, slackName: SLACK_DEFAULT.name
 };
 const S = { settings: { ...DEFAULTS }, viewYm: ymOf(todayStr()), entries: [], editingId: null, cManual: false, justAdded: null };
 
@@ -451,6 +452,7 @@ function renderSettings() {
   $('#sCommute').value = st.commuteKm || 0;
   $('#sGas').value = st.gasUrl || '';
   $('#sKey').value = st.syncKey || '';
+  $('#sGemini').value = st.geminiUrl || '';
   $('#sAuto').checked = !!st.autoSend;
   $('#sSlackName').value = st.slackName || '';
   $('#sSlackLink').value = st.slackUser && st.slackTeam ? `https://${st.slackTeam}.slack.com/team/${st.slackUser}` : '';
@@ -469,14 +471,15 @@ function renderSlackLine() {
 function renderSendLine() {
   renderSlackLine();
   const st = S.settings;
-  $('#sheetBtn').hidden = !st.gasUrl;
-  $('#sendLine').hidden = !st.gasUrl;
+  const anyUrl = st.gasUrl || st.geminiUrl;
+  $('#sheetBtn').hidden = !anyUrl;
+  $('#sendLine').hidden = !anyUrl;
   const unsent = Object.keys(lsGet('unsent') || {}).length;
   const at = lsGet('syncAt');
   const when = at ? new Date(at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-  const line = !st.gasUrl ? '' : unsent ? `未バックアップが${unsent}か月分あります。電波のある所でアプリを開くと送ります。` : at ? `最後のバックアップ：${when}` : 'まだバックアップしていません';
+  const line = !anyUrl ? '' : unsent ? `未バックアップが${unsent}か月分あります。電波のある所でアプリを開くと送ります。` : at ? `最後のバックアップ：${when}` : 'まだバックアップしていません';
   $('#sendLine').textContent = line;
-  $('#syncLine').textContent = !st.gasUrl ? '送信先URLを入れると、記録のたびに自動でバックアップします。' : line;
+  $('#syncLine').textContent = !anyUrl ? '送信先URLを入れると、記録のたびに自動でバックアップします。' : line;
 }
 function renderAll() { renderOdo(); renderSummary(); renderList(); renderRank(); renderChips(); renderSendLine(); calc(); }
 
@@ -656,15 +659,36 @@ function printSheet() {
 function markUnsent(ym) { const u = lsGet('unsent') || {}; u[ym] = 1; lsPut('unsent', u); }
 const newKey = () => Array.from(crypto.getRandomValues(new Uint8Array(9)), b => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
 function ensureKey() { if (!S.settings.syncKey) { S.settings.syncKey = newKey(); saveSettings(); renderSettings(); } return S.settings.syncKey; }
+const postJson = (url, payload) => fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+// Gemini版「交通費精算マネージャー」の受け口（明細一覧・訪問先集計）の形式
+function geminiPayload(ym, entries) {
+  const list = sortEntries(entries), t = totals(list);
+  const cnt = {};
+  for (const e of list) if (e.to && e.to !== S.settings.home) cnt[e.to] = (cnt[e.to] || 0) + 1;
+  return {
+    targetMonth: ym, userName: S.settings.name || '未設定',
+    records: list.map(e => {
+      const [y, m, d] = e.date.split('-').map(Number);
+      return {
+        date: `${y}/${m}/${d}`, departure: e.from, destination: e.to,
+        totalDistance: e.km, commuteDistance: e.commuteKm, businessDistance: e.bizKm,
+        commuteCost: amtC(e), businessCost: amtB(e), totalCost: amtC(e) + amtB(e),
+        note: e.startM != null && e.endM != null ? `メーター ${e.startM}→${e.endM}` : ''
+      };
+    }),
+    summary: { totalDistance: t.ck + t.bk, totalCommuteCost: t.c, totalBusinessCost: t.b, grandTotal: t.all },
+    stats: Object.entries(cnt).sort((a, b) => b[1] - a[1])
+  };
+}
 async function postBackup(ym) {
   const entries = getMonth(ym);
-  const { gasUrl, ...safe } = S.settings;
-  const payload = { app: 'meterbook', key: ensureKey(), name: S.settings.name || '未設定', month: ym, rows: tableRows(entries), entries, settings: safe };
-  await fetch(S.settings.gasUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+  const { gasUrl, geminiUrl, ...safe } = S.settings;
+  if (gasUrl) await postJson(gasUrl, { app: 'meterbook', key: ensureKey(), name: S.settings.name || '未設定', month: ym, rows: tableRows(entries), entries, settings: safe });
+  if (geminiUrl) await postJson(geminiUrl, geminiPayload(ym, entries));
 }
 let flushing = null;
 function flushBackup(force) {
-  if (!S.settings.gasUrl || (!S.settings.autoSend && !force)) return Promise.resolve(false);
+  if ((!S.settings.gasUrl && !S.settings.geminiUrl) || (!S.settings.autoSend && !force)) return Promise.resolve(false);
   if (flushing) return flushing.then(() => flushBackup(force));
   flushing = (async () => {
     const months = Object.keys(lsGet('unsent') || {});
@@ -687,7 +711,7 @@ function flushBackup(force) {
   return flushing;
 }
 async function sendSheet() {
-  if (!S.settings.gasUrl) { $('#settingsBox').open = true; $('#sGas').focus(); return toast('先に送信先URLを入れてください'); }
+  if (!S.settings.gasUrl && !S.settings.geminiUrl) { $('#settingsBox').open = true; $('#sGas').focus(); return toast('先に送信先URLを入れてください'); }
   $('#sheetBtn').disabled = true; $('#sheetBtn').textContent = '送信中…';
   const ok = await flushBackup(true);
   $('#sheetBtn').disabled = false; $('#sheetBtn').textContent = 'スプレッドシートに送信';
@@ -912,6 +936,8 @@ $('#sHome').addEventListener('change', e => { S.settings.home = e.target.value; 
 $('#sGas').addEventListener('input', e => { S.settings.gasUrl = e.target.value.trim(); if (S.settings.gasUrl) { ensureKey(); for (const ym of allMonthKeys()) markUnsent(ym); } settingsChanged(); });
 $('#sGas').addEventListener('change', () => flushBackup());
 $('#sKey').addEventListener('input', e => { S.settings.syncKey = e.target.value.trim(); settingsChanged(); });
+$('#sGemini').addEventListener('input', e => { S.settings.geminiUrl = e.target.value.trim(); if (S.settings.geminiUrl) for (const ym of allMonthKeys()) markUnsent(ym); settingsChanged(); });
+$('#sGemini').addEventListener('change', () => flushBackup());
 $('#pullBtn').addEventListener('click', pullBackup);
 $('#sAuto').addEventListener('change', e => { S.settings.autoSend = e.target.checked; settingsChanged(); if (e.target.checked) flushBackup(); });
 $('#copyGas').addEventListener('click', async () => { try { await navigator.clipboard.writeText(GAS); toast('コードをコピーしました'); } catch { toast('コピーできませんでした。長押しで選択してください'); } });
