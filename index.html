@@ -318,7 +318,7 @@ ol.steps{margin:0;padding-left:20px;font-size:13px;color:var(--ink2);display:fle
 
 <script>
 (() => {
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.5.2';
 const $ = s => document.querySelector(s);
 const pad = n => String(n).padStart(2, '0');
 const yen = n => '¥' + Math.round(n || 0).toLocaleString('ja-JP');
@@ -561,9 +561,7 @@ function onSubmit(ev) {
   const i = list.findIndex(x => x.id === entry.id);
   if (i >= 0) list[i] = entry; else list.push(entry);
   if (!saveMonth(ym, list)) return;
-  if (endM != null && endM >= (S.settings.lastMeter ?? 0)) S.settings.lastMeter = endM;
-  if (!wasEdit) S.settings.lastPlace = to;
-  saveSettings();
+  recalcLast();
   S.justAdded = entry.id;
   toast(wasEdit ? '更新しました' : `追加しました（${entry.km} km）。続けて次の区間を入力できます`);
   resetForm(true);
@@ -571,11 +569,22 @@ function onSubmit(ev) {
   renderChain();
   if (!wasEdit) $('#form').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+// 最新の到着地とメーター：全記録のうち日付が一番新しい区間から取り直す（編集・削除で間違いが残らないように）
+function recalcLast() {
+  const all = sortEntries(allMonthKeys().flatMap(getMonth));
+  const last = all.at(-1);
+  const withMeter = [...all].reverse().find(e => e.endM != null);
+  S.settings.lastPlace = last ? last.to : '';
+  S.settings.lastMeter = withMeter ? withMeter.endM : null;
+  saveSettings(); renderOdo();
+}
 function deleteEntry(id) {
   const list = S.entries.filter(x => x.id !== id);
   if (!saveMonth(S.viewYm, list)) return;
+  S.entries = list; recalcLast();
   if (S.editingId === id) resetForm(true);
-  S.entries = list; renderAll();
+  else if (!S.editingId && !$('#fTo').value.trim() && !$('#fEnd').value.trim()) continueFrom($('#fDate').value);
+  renderAll();
   toast('削除しました');
 }
 function setView(ym) {
